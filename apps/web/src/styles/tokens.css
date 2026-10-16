@@ -1,0 +1,186 @@
+/*
+ * "Assay" design tokens (UI design notes section 3).
+ * Light values live in @theme; dark values override the same custom properties under
+ * [data-theme='dark']. Components use token utilities (bg-canvas, text-ink), never raw hex.
+ * `static` keeps every token emitted so the design-system page and tests can read them.
+ */
+@theme static {
+  --color-*: initial;
+  --color-white: #ffffff;
+  --color-transparent: transparent;
+  --color-current: currentColor;
+
+  /* Surfaces and lines */
+  --color-canvas: #f2f4f0;
+  --color-surface: #fbfcfa;
+  --color-raised: #ffffff;
+  --color-sunken: #e8ece7;
+  --color-line: #d6dcd5;
+  --color-line-strong: #7a8780;
+  --color-scrim: rgb(10 16 15 / 0.5);
+
+  /* Text */
+  --color-ink: #14201c;
+  --color-ink-2: #44534e;
+  --color-ink-3: #586762;
+
+  /* Brand and accent */
+  --color-primary: #0b5c4e;
+  --color-primary-hover: #084a3f;
+  --color-on-primary: #ffffff;
+  --color-primary-tint: #e8efec;
+  --color-brass: #a87908;
+
+  /* Semantic */
+  --color-income: #0b6b4f;
+  --color-danger: #b42318;
+  --color-on-danger: #ffffff;
+  --color-warning: #8a5100;
+  --color-warning-mark: #b26a00;
+  --color-info: #1d5fa8;
+  --color-success: #0b6b4f;
+  --color-danger-tint: color-mix(in srgb, var(--color-danger) 12%, var(--color-surface));
+  --color-warning-tint: color-mix(in srgb, var(--color-warning) 12%, var(--color-surface));
+  --color-info-tint: color-mix(in srgb, var(--color-info) 12%, var(--color-surface));
+  --color-success-tint: color-mix(in srgb, var(--color-success) 12%, var(--color-surface));
+
+  /* Focus */
+  --color-focus-ring: #14201c;
+
+  /* Chart tokens */
+  --color-series-income: #0b7a5c;
+  --color-series-expense: #2358c4;
+  --color-series-net: #14201c;
+  --color-series-other: #55646e;
+  --color-grid: #e3e7e1;
+  --color-axis: #c2cac3;
+
+  /* Typography */
+  --font-display:
+    'Bricolage Grotesque Variable', 'Bricolage Fallback', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'IBM Plex Sans Variable', 'Plex Sans Fallback', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', Menlo, monospace;
+
+  --text-figure-hero: 3.5rem;
+  --text-figure-hero--line-height: 3.75rem;
+  --text-figure-lg: 1.75rem;
+  --text-figure-lg--line-height: 2rem;
+  --text-title: 1.75rem;
+  --text-title--line-height: 2.125rem;
+  --text-heading: 1.25rem;
+  --text-heading--line-height: 1.75rem;
+  --text-subheading: 1rem;
+  --text-subheading--line-height: 1.5rem;
+  --text-body: 1rem;
+  --text-body--line-height: 1.5rem;
+  --text-body-sm: 0.875rem;
+  --text-body-sm--line-height: 1.25rem;
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1rem;
+  --text-mono: 0.8125rem;
+  --text-mono--line-height: 1.25rem;
+
+  /* Radii: r-sm 4 (inputs, chips), r-md 8 (buttons, panels), r-lg 12 (dialogs, sheets) */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* Breakpoints (3.6). sm/md/lg/xl/2xl keep Tailwind defaults; xs is added. */
+  --breakpoint-xs: 30rem;
+
+  /* Elevation: popovers one soft shadow, dialogs one larger shadow, panels none */
+  --shadow-popover: 0 4px 16px rgb(10 16 15 / 0.12);
+  --shadow-dialog: 0 16px 48px rgb(10 16 15 / 0.24);
+
+  /* Motion (3.4) */
+  --ease-out-expo: cubic-bezier(0.2, 0, 0, 1);
+  --animate-fade-in: fade-in 140ms ease-out;
+  --animate-dialog-in: dialog-in 200ms cubic-bezier(0.2, 0, 0, 1);
+  --animate-toast-in: toast-in 200ms cubic-bezier(0.2, 0, 0, 1);
+  --animate-spin: spin 800ms linear infinite;
+  --animate-shimmer: shimmer 1.4s ease-in-out infinite;
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes dialog-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes shimmer {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.55;
+    }
+  }
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --color-canvas: #0e1514;
+  --color-surface: #141d1b;
+  --color-raised: #1a2523;
+  --color-sunken: #0a100f;
+  --color-line: #26332f;
+  --color-line-strong: #67796f;
+  --color-scrim: rgb(0 0 0 / 0.6);
+
+  --color-ink: #e8efec;
+  --color-ink-2: #b4c2bd;
+  --color-ink-3: #8fa09a;
+
+  --color-primary: #4cc3a8;
+  --color-primary-hover: #6ad2bb;
+  --color-on-primary: #04201a;
+  --color-primary-tint: #1b312c;
+  --color-brass: #e0b340;
+
+  --color-income: #5fd3b4;
+  --color-danger: #ff8a80;
+  --color-on-danger: #2b0a07;
+  --color-warning: #f0b14a;
+  --color-warning-mark: #e0a030;
+  --color-info: #7fb2f0;
+  --color-success: #5fd3b4;
+
+  --color-focus-ring: #e8efec;
+
+  --color-series-income: #1fa085;
+  --color-series-expense: #3987e5;
+  --color-series-net: #e8efec;
+  --color-series-other: #7f929d;
+  --color-grid: #26332f;
+  --color-axis: #3b4b46;
+
+  --shadow-popover: 0 0 0 1px #26332f;
+  --shadow-dialog: 0 0 0 1px #26332f;
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+}

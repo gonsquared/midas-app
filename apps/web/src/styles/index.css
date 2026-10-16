@@ -1,0 +1,68 @@
+@import 'tailwindcss';
+@import './fonts.css';
+@import './tokens.css';
+
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    -webkit-text-size-adjust: 100%;
+    /* Focus is never hidden under the sticky header or bottom bar. */
+    scroll-padding-top: 4.5rem;
+    scroll-padding-bottom: 5rem;
+  }
+
+  /* Dialog scroll lock. A class, not injected CSS, so style-src 'self' holds. */
+  body.scroll-locked {
+    overflow: hidden;
+  }
+
+  body {
+    min-height: 100dvh;
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+  }
+
+  /* One focus treatment everywhere: 2px ink ring, 2px offset. Never removed without replacement. */
+  :focus-visible {
+    outline: 2px solid var(--color-focus-ring);
+    outline-offset: 2px;
+  }
+
+  /* Programmatic focus targets (h1, main) get no ring on route change; they are not controls. */
+  [tabindex='-1']:focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  h1,
+  h2 {
+    font-family: var(--font-display);
+    font-weight: 600;
+  }
+
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  @media (forced-colors: active) {
+    :focus-visible {
+      outline-color: Highlight;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "dialect": "postgres",
+  "camelCase": true,
+  "url": "env(DATABASE_MIGRATION_URL)",
+  "outFile": "src/platform/db/database.generated.ts",
+  "excludePattern": "public.schema_migrations"
+}

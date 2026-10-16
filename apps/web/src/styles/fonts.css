@@ -1,0 +1,23 @@
+/* Self-hosted WOFF2 via fontsource (CSP: font-src 'self'). font-display: swap is set by the packages. */
+@import '@fontsource-variable/bricolage-grotesque/wght.css';
+@import '@fontsource-variable/ibm-plex-sans/wght.css';
+@import '@fontsource/ibm-plex-mono/400.css';
+
+/* Size-adjusted local fallbacks so the swap causes no meaningful layout shift. */
+@font-face {
+  font-family: 'Bricolage Fallback';
+  src: local('Arial');
+  size-adjust: 98%;
+  ascent-override: 93%;
+  descent-override: 24%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Plex Sans Fallback';
+  src: local('Arial');
+  size-adjust: 101%;
+  ascent-override: 101%;
+  descent-override: 27%;
+  line-gap-override: 0%;
+}

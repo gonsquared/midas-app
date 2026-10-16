@@ -1,0 +1,26 @@
+# gitleaks configuration (used by the secret-scan job in .github/workflows/ci.yml).
+# Extends the built-in ruleset. The allowlist below is deliberately narrow: every entry is a
+# placeholder or a documented non-secret. Adding an entry needs review; see CONTRIBUTING.md
+# ("Secret scanning and allowlists").
+
+title = "Midas gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Placeholders and CI-only throwaway values that are not secrets"
+
+# Lockfile hashes only. .env.example is deliberately NOT path-allowlisted: it is scanned, and its
+# placeholders must match the regexes below.
+paths = [
+  '''(^|/)pnpm-lock\.yaml$''',
+]
+
+# Values that are intentionally fake. A real secret must never match these patterns.
+regexes = [
+  # .env.example and compose placeholders, for example change-me-local-only.
+  '''change-me-[a-z0-9-]+''',
+  # Throwaway password for the CI-only Postgres service container.
+  '''ci-not-a-secret''',
+]

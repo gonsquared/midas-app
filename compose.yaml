@@ -1,0 +1,95 @@
+# Local development stack: PostgreSQL 17, Mailpit and the Midas API (serving the built SPA).
+#
+#   cp .env.example .env        # then replace every change-me-* placeholder
+#   docker compose up --build   # db -> migrate (one-shot) -> api; Mailpit UI on http://localhost:8025
+#   docker compose down         # stop, keep data
+#   docker compose down -v      # stop and DELETE the database volume (reset)
+#
+# Only loopback ports are published. Container networking overrides DATABASE_URL and SMTP_HOST,
+# so the values in .env (written for running the API on the host) are not used by these services.
+name: midas
+
+x-midas-app: &midas-app
+  build:
+    context: .
+    dockerfile: infra/docker/Dockerfile
+    target: runtime
+  image: midas-local:dev
+  env_file:
+    - path: ./.env
+      required: false
+  environment:
+    NODE_ENV: development
+    DATABASE_URL: 'postgres://midas_app:${MIDAS_APP_DB_PASSWORD:?set MIDAS_APP_DB_PASSWORD in .env}@db:5432/${POSTGRES_DB:-midas}'
+    DATABASE_MIGRATION_URL: 'postgres://${POSTGRES_USER:-midas_owner}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-midas}'
+    APP_BASE_URL: http://localhost:3000
+    MAIL_TRANSPORT: smtp
+    SMTP_HOST: mailpit
+    SMTP_PORT: '1025'
+    SMTP_SECURE: 'false'
+
+services:
+  db:
+    image: postgres:17-bookworm
+    # Debian-based (glibc) to match common managed PostgreSQL collations (database design notes 15.1).
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-midas_owner}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-midas}
+      MIDAS_APP_DB_PASSWORD: ${MIDAS_APP_DB_PASSWORD:?set MIDAS_APP_DB_PASSWORD in .env}
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - log_min_duration_statement=250
+      - -c
+      - log_lock_waits=on
+    ports:
+      - '127.0.0.1:5432:5432'
+    volumes:
+      # Named volume: kept by `docker compose down`, removed by `docker compose down -v`.
+      - midas-db-data:/var/lib/postgresql/data
+      # Runs only when the volume is first initialized: creates the midas_app role.
+      - ./infra/db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:v1.31.6
+    # SMTP sink for local mail (reset emails). Web UI on 8025, SMTP on 1025.
+    ports:
+      - '127.0.0.1:8025:8025'
+      - '127.0.0.1:1025:1025'
+    restart: unless-stopped
+
+  migrate:
+    <<: *midas-app
+    # One-shot: applies pending migrations through the owner role, then exits 0.
+    command: ['node', '--import', 'tsx', 'src/cli.ts', 'migrate']
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: 'no'
+
+  api:
+    <<: *midas-app
+    init: true
+    ports:
+      - '127.0.0.1:3000:3000'
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  midas-db-data:

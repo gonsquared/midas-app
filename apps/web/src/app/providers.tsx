@@ -1,0 +1,23 @@
+import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
+import { ToastProvider } from '@/components/ui/toast';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import { ThemeProvider } from './theme-provider';
+
+export function AppProviders({
+  queryClient,
+  children,
+}: {
+  queryClient: QueryClient;
+  children: ReactNode;
+}) {
+  return (
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider>
+          <ToastProvider>{children}</ToastProvider>
+        </TooltipProvider>
+      </QueryClientProvider>
+    </ThemeProvider>
+  );
+}
