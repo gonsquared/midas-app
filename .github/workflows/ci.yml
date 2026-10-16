@@ -1,0 +1,184 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+# Least privilege: read-only token by default. Jobs that need more must say so explicitly.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-test-build:
+    name: Lint, format, typecheck, test, build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        # Same major and image family as TEST_DATABASE_IMAGE and compose.yaml (PostgreSQL 17).
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-not-a-secret # throwaway, CI-only; allowlisted in .gitleaks.toml
+          POSTGRES_DB: midas
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d midas"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      # Integration tests use this admin URL instead of Testcontainers (apps/api/test/global-setup.ts).
+      TEST_DATABASE_URL: postgres://postgres:ci-not-a-secret@localhost:5432/midas
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm (version from packageManager)
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node.js (version from .nvmrc)
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit and integration tests
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm test 2>&1 | tee "${RUNNER_TEMP}/test.log"
+          # The database tests skip (with this marker) when no database is reachable. In CI they
+          # must run, so a skip is a failure.
+          if grep -q '\[db-tests\] SKIPPED' "${RUNNER_TEMP}/test.log"; then
+            echo "::error::Database integration tests were skipped; TEST_DATABASE_URL is not working."
+            exit 1
+          fi
+
+      - name: Build
+        run: pnpm build
+
+      - name: Check the web bundle has no dev-only code
+        shell: bash
+        run: |
+          # The dev auth bypass and the design-system route must never reach a production build.
+          if [ ! -d apps/web/dist ]; then
+            echo '::error::apps/web/dist is missing; the web build did not run.'
+            exit 1
+          fi
+          if grep -rIl -e 'dev-only-not-a-real-token' -e 'design-system' apps/web/dist; then
+            echo '::error::Dev-only code (fake session or design-system route) found in apps/web/dist.'
+            exit 1
+          fi
+
+      - name: Apply migrations to a scratch database
+        env:
+          DATABASE_URL: postgres://postgres:ci-not-a-secret@localhost:5432/midas
+          DATABASE_MIGRATION_URL: postgres://postgres:ci-not-a-secret@localhost:5432/midas
+        run: pnpm --filter @midas/api migrate
+
+      - name: Check generated database types are up to date
+        env:
+          DATABASE_URL: postgres://postgres:ci-not-a-secret@localhost:5432/midas
+          DATABASE_MIGRATION_URL: postgres://postgres:ci-not-a-secret@localhost:5432/midas
+        run: |
+          pnpm --filter @midas/api db:codegen
+          if ! git diff --exit-code -- apps/api/src/platform/db/database.generated.ts; then
+            echo "::error::database.generated.ts is stale. Run pnpm --filter @midas/api db:codegen against a migrated database and commit the result."
+            exit 1
+          fi
+
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out with full history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run gitleaks (pinned image, config in .gitleaks.toml)
+        shell: bash
+        run: |
+          # Run as the runner's uid so git accepts the bind-mounted checkout (safe.directory).
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -v "${GITHUB_WORKSPACE}:/repo" \
+            -w /repo \
+            zricethezav/gitleaks:v8.30.1 \
+            detect --source=/repo --config=/repo/.gitleaks.toml \
+            --redact --verbose --exit-code 1
+
+  dependency-audit:
+    name: Dependency audit (all dependencies, high and critical)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm (version from packageManager)
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node.js (version from .nvmrc)
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # All dependencies are audited: the runtime image ships devDependencies and runs through tsx.
+      # The one accepted advisory (braces via kysely-codegen, dev-time only) is an explicit,
+      # commented ignore in pnpm-workspace.yaml (auditConfig.ignoreGhsas).
+      - name: Audit dependencies
+        run: pnpm audit --audit-level=high
+
+  docker-build:
+    name: Docker image build (no push)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build runtime image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: infra/docker/Dockerfile
+          target: runtime
+          push: false
+          tags: midas:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
