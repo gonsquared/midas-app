@@ -2,8 +2,8 @@
 
 A personal finance tracker for recording income, expenses and transfers across multiple wallets, planning spending with budgets, automating regular items, and understanding your money through a dashboard and reports.
 
-> **Status: planning complete, development not started.**
-> There is no application code in this repository yet. Everything below describing the stack, structure and setup is the **plan**, taken from the documents in [`docs/`](./docs). Commands and paths will be confirmed once the scaffold lands in Sprint 1.
+> **Status: Sprint 1 (Foundation) in progress.**
+> Implemented: pnpm monorepo, API skeleton with the registration endpoint, web app shell and design system, database migrations, Docker Compose stack and CI. The features below are the v1 plan; only registration exists today.
 
 ## Features (planned for v1)
 
@@ -19,102 +19,160 @@ A personal finance tracker for recording income, expenses and transfers across m
 
 Out of scope for v1: bank syncing, shared wallets, receipt OCR, native mobile apps, payments and subscriptions.
 
-## Planned tech stack
+## Tech stack
 
 | Area | Choice |
 | --- | --- |
-| Runtime and package manager | Node.js 24 LTS, pnpm 10 workspaces (via Corepack) |
-| Backend | TypeScript, Fastify 5, Zod 4, pino, OpenAPI 3.1 generated from shared schemas |
-| Frontend | React 19, Vite, TanStack Router and Query, React Hook Form, Tailwind CSS v4, Radix UI, Recharts |
+| Runtime and package manager | Node.js 24, pnpm 10 workspaces (via Corepack) |
+| Backend | TypeScript, Fastify 5, Zod 4, argon2id, jose (JWT) |
+| Frontend | React 19, Vite, Tailwind CSS v4, Radix UI |
 | Database | PostgreSQL 17, Kysely on `pg`, node-pg-migrate |
-| Auth | Short-lived JWT access token (in memory), rotating httpOnly refresh cookie, argon2id |
-| Mail | SMTP via nodemailer (Mailpit for local development) |
-| Testing | Vitest, Testcontainers, React Testing Library, MSW, Playwright, axe |
-| Delivery | Docker (single image serving API and SPA), Docker Compose for local development, GitHub Actions |
+| Mail | SMTP (Mailpit for local development) |
+| Testing | Vitest, Testcontainers |
+| Delivery | Docker, Docker Compose, GitHub Actions |
 
-Architecture in brief: a modular monolith. One Fastify process hosts all domain modules, serves the built React SPA from the same origin, and runs the recurring-transaction scheduler. Money is stored as integer minor units. See [docs/architecture.md](./docs/architecture.md) for decisions and trade-offs.
+Planned for later sprints: TanStack Router and Query, Recharts, Playwright and axe end-to-end tests.
 
-## Planned repository structure
+## Architecture summary
+
+- **Modular monolith.** One Fastify process hosts the domain modules. The React SPA is built separately and is planned to be served from the same origin by the API (static-SPA plugin not yet landed).
+- **Shared package.** `@midas/shared` holds Zod schemas and helpers used by both apps.
+- **Money** is stored as integer minor units.
+- **Database.** PostgreSQL 17 with SQL migrations (node-pg-migrate) and generated Kysely types. The app connects as a restricted role; migrations run as the owner role (`DATABASE_MIGRATION_URL`).
+- **Security.** Passwords hashed with argon2id, configuration validated at boot (fail fast, values never echoed), placeholder secrets rejected outside tests, helmet headers, per-IP rate limiting on registration, strict CSP for the SPA (no inline scripts or styles), gitleaks secret scanning and dependency audit in CI. See [SECURITY.md](./SECURITY.md).
+
+## Repository structure
 
 ```
 midas-app/
 ├─ apps/
-│  ├─ api/          # @midas/api: Fastify backend (modules, platform, db migrations and seeds)
-│  └─ web/          # @midas/web: React + Vite frontend
+│  ├─ api/          # @midas/api: Fastify backend (src/modules, src/platform, db migrations and seeds)
+│  └─ web/          # @midas/web: React + Vite frontend and design system
 ├─ packages/
-│  └─ shared/       # @midas/shared: Zod schemas, money, recurrence and budget math
-├─ tooling/         # shared ESLint and TypeScript presets
-├─ e2e/             # Playwright specs and performance scripts
-├─ infra/           # Dockerfile, production compose, deployment blueprint
-├─ docs/            # architecture, API contract, database, UI design, tracker
-├─ .github/         # workflows and templates
+│  └─ shared/       # @midas/shared: shared Zod schemas and helpers
+├─ tooling/         # shared tooling presets
+├─ e2e/             # end-to-end suites (placeholder)
+├─ infra/           # Dockerfile and database init scripts
+├─ .github/         # CI workflow, Dependabot, templates
 ├─ compose.yaml  .env.example  package.json  pnpm-workspace.yaml
-└─ README.md  LICENSE  (CONTRIBUTING.md, SECURITY.md planned)
+└─ README.md  CONTRIBUTING.md  SECURITY.md  LICENSE
 ```
 
-Only `docs/`, this README, `LICENSE`, `.gitignore`, `.editorconfig` and `.env.example` exist today.
+## Local setup
 
-## Local setup (planned, not yet runnable)
-
-The following reflects the planned workflow in [docs/architecture.md](./docs/architecture.md) sections 6 and 10. It will not work until the scaffold is implemented.
-
-Prerequisites (planned): Node.js 24, Corepack, Docker with Compose.
+Prerequisites: Node.js 24, Corepack (ships with Node), and Docker with Compose for the database.
 
 ```bash
-corepack enable                 # once per machine
-pnpm install                    # install all workspaces
-cp .env.example .env            # then adjust placeholders
-docker compose up               # db, mailpit, api (3000), web (5173)
+corepack enable                 # once per machine; pins pnpm to the packageManager version (10.x)
+pnpm install
+cp .env.example .env            # then replace every change-me-* placeholder
 ```
 
-Planned commands:
+Generate a JWT secret with, for example, `openssl rand -base64 48`.
+
+### Run with Docker Compose
 
 ```bash
-pnpm dev                              # api and web in parallel
-pnpm --filter @midas/api dev          # api only
-pnpm --filter @midas/web dev          # web only
-pnpm lint && pnpm typecheck
-pnpm test                             # unit tests
-pnpm test:integration                 # API integration tests (Testcontainers)
-pnpm test:e2e                         # Playwright against the compose stack
+docker compose up --build       # PostgreSQL 17, Mailpit, one-shot migrate, API
+```
+
+TODO: `docker compose up` has not yet been verified end to end; confirm before relying on it.
+
+| Service                   | URL                   |
+| ------------------------- | --------------------- |
+| API                       | http://localhost:3000 |
+| Mailpit UI (SMTP on 1025) | http://localhost:8025 |
+| PostgreSQL                | localhost:5432        |
+
+Ports are published on 127.0.0.1 only. The web dev server (below) is not part of the Compose stack. Reset local data with `docker compose down -v`.
+
+### Run the apps in development
+
+```bash
+pnpm --filter @midas/api dev    # API with watch mode, loads ../../.env (port 3000)
+pnpm --filter @midas/web dev    # Vite dev server (port 5173)
+```
+
+### Database migrations
+
+Run from the repository root; each maps to a script in `apps/api/package.json`.
+
+```bash
+pnpm --filter @midas/api migrate          # apply pending migrations
+pnpm --filter @midas/api migrate:down     # roll back
+pnpm --filter @midas/api migrate:status   # show applied/pending
+pnpm --filter @midas/api migrate:verify   # up, down to zero, up; checks catalogs are identical
+pnpm --filter @midas/api db:codegen       # regenerate Kysely types from the database
+```
+
+## Checks and tests
+
+```bash
+pnpm lint
+pnpm format:check
+pnpm typecheck
+pnpm test
 pnpm build
-pnpm --filter @midas/api cli migrate
-pnpm --filter @midas/api cli seed:dev
-pnpm --filter @midas/api cli admin:create --email you@example.com
 ```
 
-Local services (planned): web on `http://localhost:5173`, API on `http://localhost:3000`, Mailpit UI on `http://localhost:8025`. Reset local data with `docker compose down -v`.
+Database-backed tests use Testcontainers, or an existing PostgreSQL 17 server when `TEST_DATABASE_URL` is set (admin URL; a throwaway database is created and dropped). They are skipped when neither is available. Use `pnpm --filter @midas/api test:watch` for watch mode.
 
-### Environment variables
+## Environment variables
 
-[`.env.example`](./.env.example) lists every planned variable with placeholder values only. Never commit real secrets; the app is planned to validate configuration at boot and fail fast when a required value is missing.
+[`.env.example`](./.env.example) lists all variables with placeholders only; never commit real secrets. The API validates the variables below at boot (`apps/api/src/platform/config.ts`) and exits with a clear error when one is invalid.
+
+| Variable | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `NODE_ENV` | no | `development` | `development`, `test` or `production` |
+| `HOST` | no | `0.0.0.0` | Bind address |
+| `PORT` | no | `3000` | 1 to 65535 |
+| `LOG_LEVEL` | no | `info` | `fatal` to `trace`, or `silent` |
+| `APP_BASE_URL` | no | `http://localhost:5173` | Valid URL |
+| `APP_VERSION` | no | `0.0.0` | Reported by `GET /health` |
+| `TRUST_PROXY` | no | `0` | Reverse-proxy hops to trust (0 to 10) |
+| `DATABASE_URL` | yes | none | `postgres://` URL for the app role |
+| `DATABASE_MIGRATION_URL` | no | `DATABASE_URL` | Owner role used by migrations |
+| `DATABASE_POOL_MAX` | no | `10` | Max 200 |
+| `DATABASE_STATEMENT_TIMEOUT_MS` | no | `15000` | |
+| `DATABASE_SSL` | no | `verify-full` in production, else `off` | `off`, `require`, `verify-full`; `off` is rejected in production |
+| `DATABASE_SSL_CA` | no | none | CA certificate for `verify-full` |
+| `JWT_ACCESS_SECRET` | yes | none | At least 43 characters; `change-me` placeholders rejected outside `NODE_ENV=test` |
+| `ACCESS_TOKEN_TTL_SECONDS` | no | `600` | Max 3600 |
+| `REFRESH_TOKEN_TTL_DAYS` | no | `30` | Max 365 |
+| `SESSION_ABSOLUTE_TTL_DAYS` | no | `90` | Must be >= `REFRESH_TOKEN_TTL_DAYS` |
+| `RATE_LIMIT_ENABLED` | no | `true` | |
+| `RATE_LIMIT_REGISTER_MAX` | no | `5` | Registrations per IP per window |
+| `RATE_LIMIT_REGISTER_WINDOW_SECONDS` | no | `3600` | |
+| `TEST_DATABASE_URL` | no | none | Tests only, see above |
+| `TEST_DATABASE_IMAGE` | no | `postgres:17-bookworm` | Tests only, Testcontainers image |
+| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `MIDAS_APP_DB_PASSWORD` | Compose | see `.env.example` | Used by the Compose database container only |
+| `SMTP_HOST`, `SMTP_PORT`, `MAIL_FROM`, `MAIL_TRANSPORT` and others | no | see `.env.example` | Listed in `.env.example` for upcoming mail features; not read by the config module yet |
+
+The web dev server also reads `VITE_DEV_HOST` (see [CONTRIBUTING.md](./CONTRIBUTING.md)).
+
+## API
+
+Currently available:
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/health` | Liveness and database readiness, reports `APP_VERSION` |
+| POST | `/api/v1/auth/register` | Create an account (rate limited per IP) |
+
+TODO: request and response shapes and an OpenAPI document are not yet published.
 
 ## Roadmap
 
-Four sprints, 80 stories, 308 points. Progress is tracked in [docs/dev-stories-tracker.md](./docs/dev-stories-tracker.md).
-
 | Sprint | Name | Focus |
 | --- | --- | --- |
-| 1 | Foundation | Architecture decisions, repository, CI, Docker, app skeletons, design system, auth schema and registration |
+| 1 | Foundation | Monorepo, CI, Docker, API and web skeletons, design system, migrations, registration (in progress) |
 | 2 | Core Features | Login and sessions, password reset, settings, wallets, categories, transactions, transfers |
 | 3 | Secondary Features | CSV export, budgets, dashboard and reports, recurring transactions, admin |
-| 4 | Quality and Release | Security hardening, code review, QA, accessibility, performance, deployment, documentation, v1.0 release |
-
-Current state: design, architecture, API contract and database design are written; no stories are Done.
-
-## Documentation
-
-- [Architecture](./docs/architecture.md): stack, domain policies, security, deployment, testing, ADRs
-- [Database design](./docs/database.md): PostgreSQL schema, migrations, seeds, environment variables
-- [API contract](./docs/api-contract.md): REST endpoints and conventions
-- [UI design](./docs/ui-design.md): design system, tokens, screens
-- [Project brief](./docs/project-brief.md)
-- [Dev stories tracker](./docs/dev-stories-tracker.md): backlog and sprint plan
+| 4 | Quality and Release | Security hardening, accessibility, performance, deployment, documentation, v1.0 release |
 
 ## Contributing
 
-Contribution guidelines (`CONTRIBUTING.md`) and a security policy (`SECURITY.md`) are planned for Sprint 1. Until then, please open an issue before starting work.
-
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, checks and conventions, and [SECURITY.md](./SECURITY.md) for reporting vulnerabilities.
 ## License
 
 [MIT](./LICENSE) © 2026 Daryll
