@@ -1,0 +1,56 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+.pnpm-debug.log*
+
+# Build output
+dist/
+build/
+out/
+coverage/
+.vite/
+*.tsbuildinfo
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test artifacts
+playwright-report/
+test-results/
+blob-report/
+.nyc_output/
+
+# Lockfiles of other package managers (pnpm only)
+package-lock.json
+yarn.lock
+bun.lock
+bun.lockb
+
+# Docker local overrides
+compose.override.yaml
+docker-compose.override.yml
+
+# IDE and editor
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
