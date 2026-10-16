@@ -1,0 +1,42 @@
+{
+  "name": "@midas/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=../../.env src/server.ts",
+    "start": "tsx --env-file-if-exists=../../.env src/server.ts",
+    "cli": "tsx --env-file-if-exists=../../.env src/cli.ts",
+    "migrate": "pnpm run cli migrate",
+    "migrate:down": "pnpm run cli migrate:down",
+    "migrate:status": "pnpm run cli migrate:status",
+    "migrate:verify": "pnpm run cli migrate:verify",
+    "db:migrate:create": "pnpm run cli migrate:create",
+    "db:codegen": "node --env-file-if-exists=../../.env node_modules/kysely-codegen/dist/cli/bin.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@fastify/helmet": "^13.2.0",
+    "@fastify/rate-limit": "^11.2.1",
+    "@midas/shared": "workspace:*",
+    "@node-rs/argon2": "^2.2.2",
+    "fastify": "^5.12.7",
+    "jose": "^6.2.12",
+    "kysely": "^0.29.6",
+    "node-pg-migrate": "^9.0.0",
+    "pg": "^8.23.1",
+    "tsx": "^4.23.15",
+    "uuid": "^14.0.3",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "^12.2.1",
+    "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
+    "kysely-codegen": "^0.20.0",
+    "testcontainers": "^12.2.1",
+    "vitest": "^5.0.5"
+  }
+}
