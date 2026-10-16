@@ -192,7 +192,7 @@ describeDb('schema migrations (real PostgreSQL)', () => {
     );
   });
 
-  it('blocks deleting a user that still has sessions (ON DELETE RESTRICT, SQLSTATE 23001)', async () => {
+  it('blocks deleting a user that still has sessions (ON DELETE RESTRICT, SQLSTATE 23503)', async () => {
     const userId = await insertUser();
     await owner.query(
       "INSERT INTO sessions (user_id, current_refresh_token_hash, expires_at) VALUES ($1, $2, now() + interval '1 day')",
@@ -200,7 +200,8 @@ describeDb('schema migrations (real PostgreSQL)', () => {
     );
     await rejects(
       owner.query('DELETE FROM users WHERE id = $1', [userId]),
-      '23001',
+      // PostgreSQL reports RESTRICT as foreign_key_violation (23503), not restrict_violation (23001).
+      '23503',
       'fk_sessions__user',
     );
   });
