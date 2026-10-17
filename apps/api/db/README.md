@@ -27,4 +27,30 @@ pnpm --filter @midas/api migrate:status
 pnpm --filter @midas/api migrate:verify          # up, snapshot, down to zero, up, compare
 pnpm --filter @midas/api db:migrate:create <name>
 pnpm --filter @midas/api db:codegen              # regenerate src/platform/db/database.generated.ts
+pnpm --filter @midas/api seed:system             # idempotent system categories (run after migrate)
 ```
+
+## Setup, Docker and backup notes
+
+- Migrations and `seed:system` connect through `DATABASE_MIGRATION_URL` (owner role); the app uses `DATABASE_URL` (`midas_app`).
+- `docker compose up` starts PostgreSQL 17, then the one-shot `migrate` service (runs `migrate` and `seed:system`), then the API.
+  `docker compose down -v` deletes the database volume.
+- Release procedure: run `migrate` and `seed:system` before starting the new image (database design notes 11.7).
+- Local backup: `docker compose exec db pg_dump -U midas_owner -Fc midas > midas.dump`; restore with
+  `docker compose exec -T db pg_restore -U midas_owner -d midas --clean --if-exists < midas.dump`.
+  Production backup and restore (PITR, encrypted dumps, restore into a new instance) is in `docs/database.md` section 14.
+- `db:check` is planned and not implemented. TODO: `docs/operations/runbook.md` does not exist yet.
+
+## Migrations so far (database design notes 11.2)
+
+| #   | File                                                   | Story    |
+| --- | ------------------------------------------------------ | -------- |
+| 1   | `20261016090000000_extensions-and-functions`           | E1-F2-S3 |
+| 2   | `20261016090100000_create-auth-tables`                 | E2-F1-S1 |
+| 3   | `20261017090000000_create-wallets`                     | E3-F1-S1 |
+| 4   | `20261017090100000_create-categories`                  | E4-F1-S1 |
+| 5   | `20261017090200000_create-transfers-and-transactions`  | E5-F1-S1 |
+
+Integration tests that exercise constraints and triggers need PostgreSQL 17 (Testcontainers or
+`TEST_DATABASE_URL`). PGlite is PostgreSQL 18 and differs: `ON DELETE RESTRICT` reports SQLSTATE 23001
+instead of 23503, and the PGlite socket server loses protocol sync after an error on a Kysely query.

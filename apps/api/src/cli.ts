@@ -1,7 +1,9 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { seedSystemCategories } from '../db/seeds/system-categories.js';
 import { parseArgs, parseCount } from './cli-args.js';
 import { ConfigError, loadMigrationConnection } from './platform/config.js';
+import { createOwnerDatabaseClient } from './platform/db/client.js';
 import {
   getMigrationStatus,
   MIGRATIONS_DIR,
@@ -23,7 +25,8 @@ Commands:
                                   [--confirm-production] is required when NODE_ENV=production
   migrate:status                  List applied and pending migrations
   migrate:verify                  Up, snapshot, down to zero, up again, compare (empty database only)
-  migrate:create <name>           Scaffold a migration file (development only), kebab-case name`;
+  migrate:create <name>           Scaffold a migration file (development only), kebab-case name
+  seed:system                     Insert missing system categories (idempotent, never overwrites)`;
 
 const NAME_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
@@ -102,6 +105,15 @@ async function main(argv: string[]): Promise<number> {
       const file = path.join(MIGRATIONS_DIR, `${utcTimestamp()}_${name}.ts`);
       await writeFile(file, TEMPLATE, { flag: 'wx' });
       console.log(`Created ${file}`);
+      return 0;
+    }
+    case 'seed:system': {
+      const { db } = createOwnerDatabaseClient(loadMigrationConnection());
+      try {
+        await seedSystemCategories(db, { logger });
+      } finally {
+        await db.destroy();
+      }
       return 0;
     }
     default:
