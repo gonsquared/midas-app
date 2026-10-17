@@ -18,7 +18,8 @@ describe('route guards', () => {
     const { router } = await renderApp('/transactions');
     expect(router.state.location.pathname).toBe('/login');
     expect(await screen.findByRole('heading', { level: 1, name: 'Sign in' })).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledOnce();
+    // The protected-route guard tries the cookie, and so does the sign-in page it lands on.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('restores the session from the refresh cookie and keeps the token in memory only', async () => {

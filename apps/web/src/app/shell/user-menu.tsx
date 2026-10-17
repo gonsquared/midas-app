@@ -4,7 +4,7 @@ import { LogOut, Monitor, Moon, Settings, Sun } from 'lucide-react';
 import { useSession } from '@/lib/session';
 import { isThemePreference } from '@/lib/theme';
 import { useSignOut } from '@/features/auth/hooks';
-import { useTheme } from '../theme-provider';
+import { useThemeSetting } from '@/features/settings/use-theme-setting';
 import { menuContentClass, menuItemClass } from './add-menu';
 
 export function initialsOf(name: string): string {
@@ -26,7 +26,7 @@ const THEME_OPTIONS = [
 
 export function UserMenu() {
   const { user } = useSession();
-  const { preference, setPreference } = useTheme();
+  const { preference, setTheme } = useThemeSetting();
   const signOut = useSignOut();
   const navigate = useNavigate();
   const name = user?.displayName ?? 'Account';
@@ -53,7 +53,7 @@ export function UserMenu() {
           <Menu.RadioGroup
             value={preference}
             onValueChange={(value) => {
-              if (isThemePreference(value)) setPreference(value);
+              if (isThemePreference(value)) void setTheme(value);
             }}
           >
             {THEME_OPTIONS.map(({ value, label, icon: Icon }) => (

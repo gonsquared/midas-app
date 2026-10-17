@@ -1,8 +1,9 @@
+import { mockApi, ok } from '@/test/mock-api';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { axe } from 'vitest-axe';
-import { renderApp, setViewport, signedInAs, VIEWPORT } from '@/test/helpers';
+import { makeAuthSession, renderApp, setViewport, signedInAs, VIEWPORT } from '@/test/helpers';
 
 describe('tablet icon rail', () => {
   it('keeps accessible names, and expands and collapses with the keyboard', async () => {
@@ -107,6 +108,8 @@ describe('mobile bottom bar', () => {
   it('opens the More sheet with the remaining destinations, theme and sign out', async () => {
     setViewport(VIEWPORT.mobile);
     signedInAs('admin');
+    // Saving the theme to the account is fire-and-forget; a failure toast would take the first Escape.
+    mockApi({ 'PATCH /me': ok(makeAuthSession('admin').user) });
     const user = userEvent.setup();
     await renderApp('/dashboard');
     await screen.findByRole('heading', { name: 'Dashboard' });

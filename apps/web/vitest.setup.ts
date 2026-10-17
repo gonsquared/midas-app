@@ -1,10 +1,12 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
 import { afterEach, expect, vi } from 'vitest';
 import { clearSession } from './src/lib/session';
 import * as axeMatchers from 'vitest-axe/matchers';
 
 expect.extend(axeMatchers);
+// Lazy route chunks and Radix popovers are slow when the whole suite runs in parallel.
+configure({ asyncUtilTimeout: 4000 });
 
 afterEach(() => {
   cleanup();

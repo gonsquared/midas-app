@@ -3,9 +3,9 @@ import { Ellipsis, LogOut, Monitor, Moon, Sun } from 'lucide-react';
 import { useState } from 'react';
 import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
 import { useSignOut } from '@/features/auth/hooks';
+import { useThemeSetting } from '@/features/settings/use-theme-setting';
 import { cn } from '@/lib/cn';
 import { isThemePreference, THEME_PREFERENCES, type ThemePreference } from '@/lib/theme';
-import { useTheme } from '../theme-provider';
 import { AddMenu } from './add-menu';
 import { ADMIN_NAV, BOTTOM_BAR_ITEMS, MORE_ITEMS } from './nav-config';
 import { NavLink } from './nav-link';
@@ -23,7 +23,7 @@ const barItemClass =
 
 function MoreSheet({ isAdmin }: { isAdmin: boolean }) {
   const [open, setOpen] = useState(false);
-  const { preference, setPreference } = useTheme();
+  const { preference, setTheme } = useThemeSetting();
   const signOut = useSignOut();
   const close = () => setOpen(false);
 
@@ -62,7 +62,7 @@ function MoreSheet({ isAdmin }: { isAdmin: boolean }) {
                 type="button"
                 aria-pressed={selected}
                 onClick={() => {
-                  if (isThemePreference(value)) setPreference(value);
+                  if (isThemePreference(value)) void setTheme(value);
                 }}
                 className={cn(
                   'flex h-11 flex-1 items-center justify-center gap-2 rounded-md border text-body-sm',
