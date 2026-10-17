@@ -15,10 +15,23 @@ export function hashRefreshToken(token: string): Buffer {
   return createHash('sha256').update(token).digest();
 }
 
-/** 32 random bytes, base64url encoded (architecture 9). */
-export function generateRefreshToken(): RefreshToken {
-  const token = randomBytes(32).toString('base64url');
+/** `<session uuid>.<43 base64url chars>` (32 random bytes). */
+const REFRESH_TOKEN_PATTERN =
+  /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.[A-Za-z0-9_-]{43}$/;
+
+/**
+ * `<sid>.<32 random bytes, base64url>` (architecture 9). The session id is not secret and not
+ * trusted: it only tells the server which session to revoke when an unknown token is replayed.
+ */
+export function generateRefreshToken(sessionId: string): RefreshToken {
+  const token = `${sessionId}.${randomBytes(32).toString('base64url')}`;
   return { token, hash: hashRefreshToken(token) };
+}
+
+/** Returns the session id of a well-formed token, or null. Pure: no database access. */
+export function parseRefreshToken(token: string): { sessionId: string } | null {
+  const match = REFRESH_TOKEN_PATTERN.exec(token);
+  return match?.[1] ? { sessionId: match[1] } : null;
 }
 
 export interface IssuedAccessToken {
