@@ -38,10 +38,42 @@ export interface DialogContentProps {
   title: string;
   description?: string;
   children?: ReactNode;
-  /** `dialog` is centered; `sheet` slides from the bottom edge on small screens. */
-  variant?: 'dialog' | 'sheet';
+  /**
+   * "dialog" is centered; "sheet" slides from the bottom edge on small screens; "drawer" is the
+   * 440px panel on the right edge (the transaction composer).
+   */
+  variant?: 'dialog' | 'sheet' | 'drawer';
   className?: string;
+  /** Use "alertdialog" for destructive confirmations. */
+  role?: 'dialog' | 'alertdialog';
+  onOpenAutoFocus?: (event: Event) => void;
+  onCloseAutoFocus?: (event: Event) => void;
+  /** Hides the close button (confirmations that must be answered with their own buttons). */
+  hideClose?: boolean;
+  /** Id of an element inside the dialog that describes it (used instead of description). */
+  describedBy?: string;
+  /** Visually hide the visible title while keeping it as the accessible name. */
+  titleHidden?: boolean;
 }
+
+/**
+ * A confirmation dialog opened from inside another dialog is a sibling portal, so moving focus or
+ * pressing inside it looks like an "outside" interaction to the first dialog. Only the scrim and
+ * real outside targets may dismiss it.
+ */
+function ignoreNestedLayers(event: { target: EventTarget | null; preventDefault: () => void }) {
+  const target = event.target;
+  if (target instanceof Element && target.closest('[role="alertdialog"]')) event.preventDefault();
+}
+
+const VARIANT_CLASSES = {
+  dialog:
+    'top-1/2 left-1/2 max-h-[85dvh] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 animate-dialog-in rounded-lg',
+  sheet:
+    'inset-x-0 bottom-0 max-h-[92dvh] animate-toast-in rounded-t-lg pb-[calc(1.25rem+env(safe-area-inset-bottom))]',
+  drawer:
+    'inset-y-0 right-0 h-dvh w-full max-w-[27.5rem] animate-toast-in rounded-l-lg max-md:max-w-none max-md:rounded-none',
+} as const;
 
 /**
  * Radix Dialog with tokens: scrim, focus trap, Esc to close, focus returns to the trigger.
@@ -53,6 +85,12 @@ export function DialogContent({
   children,
   variant = 'dialog',
   className,
+  role,
+  onOpenAutoFocus,
+  onCloseAutoFocus,
+  hideClose = false,
+  titleHidden = false,
+  describedBy,
 }: DialogContentProps) {
   return (
     <RadixDialog.Portal>
@@ -66,18 +104,27 @@ export function DialogContent({
       />
       <RadixDialog.Content
         aria-modal="true"
-        {...(description ? {} : { 'aria-describedby': undefined })}
+        onFocusOutside={ignoreNestedLayers}
+        onInteractOutside={ignoreNestedLayers}
+        {...(role ? { role } : {})}
+        {...(describedBy
+          ? { 'aria-describedby': describedBy }
+          : description
+            ? {}
+            : { 'aria-describedby': undefined })}
+        {...(onOpenAutoFocus ? { onOpenAutoFocus } : {})}
+        {...(onCloseAutoFocus ? { onCloseAutoFocus } : {})}
         className={cn(
-          'fixed z-60 flex max-h-[85dvh] flex-col gap-4 overflow-y-auto border border-line bg-raised p-5 text-ink shadow-dialog',
-          variant === 'dialog'
-            ? 'top-1/2 left-1/2 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 animate-dialog-in rounded-lg'
-            : 'inset-x-0 bottom-0 animate-toast-in rounded-t-lg pb-[calc(1.25rem+env(safe-area-inset-bottom))]',
+          'fixed z-60 flex flex-col gap-4 overflow-y-auto border border-line bg-raised p-5 text-ink shadow-dialog',
+          VARIANT_CLASSES[variant],
           className,
         )}
       >
         <div className="flex items-start justify-between gap-4">
           <div className="flex flex-col gap-1">
-            <RadixDialog.Title className="font-display text-heading font-semibold">
+            <RadixDialog.Title
+              className={cn('font-display text-heading font-semibold', titleHidden && 'sr-only')}
+            >
               {title}
             </RadixDialog.Title>
             {description ? (
@@ -86,9 +133,11 @@ export function DialogContent({
               </RadixDialog.Description>
             ) : null}
           </div>
-          <RadixDialog.Close asChild>
-            <IconButton label="Close" size="sm" icon={<X className="size-4" />} />
-          </RadixDialog.Close>
+          {hideClose ? null : (
+            <RadixDialog.Close asChild>
+              <IconButton label="Close" size="sm" icon={<X className="size-4" />} />
+            </RadixDialog.Close>
+          )}
         </div>
         {children}
       </RadixDialog.Content>

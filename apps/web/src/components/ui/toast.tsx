@@ -17,6 +17,10 @@ export interface ToastInput {
   title: string;
   description?: string;
   variant?: ToastVariant;
+  /** Optional action such as Undo or View. Selecting it dismisses the toast. */
+  action?: { label: string; onSelect: () => void };
+  /** Milliseconds before auto-dismiss (default 6000). Hover and focus pause it. */
+  duration?: number;
 }
 
 interface ToastItem extends ToastInput {
@@ -71,6 +75,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               key={item.id}
               // Failures interrupt (role=alert); information is polite (role=status).
               type={variant === 'danger' ? 'foreground' : 'background'}
+              {...(item.duration ? { duration: item.duration } : {})}
               onOpenChange={(open) => {
                 if (!open) remove(item.id);
               }}
@@ -91,6 +96,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                   </RadixToast.Description>
                 ) : null}
               </div>
+              {item.action ? (
+                <RadixToast.Action altText={item.action.label} asChild>
+                  <button
+                    type="button"
+                    onClick={item.action.onSelect}
+                    className="inline-flex h-8 shrink-0 items-center rounded-sm border border-line-strong px-3 text-body-sm font-medium hover:bg-sunken"
+                  >
+                    {item.action.label}
+                  </button>
+                </RadixToast.Action>
+              ) : null}
               <RadixToast.Close
                 aria-label="Dismiss notification"
                 className="inline-flex size-8 shrink-0 items-center justify-center rounded-sm hover:bg-sunken"

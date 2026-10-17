@@ -1,0 +1,114 @@
+/*
+ * Category colors (ui-design 13.2, 18.2.2). One rule per palette key, kept in sync with
+ * CATEGORY_COLORS in @midas/shared by category-colors.test.ts (it fails on drift). Components set
+ * only data-cat-color and read var(--cat); no inline styles, no runtime-injected CSS.
+ */
+:root {
+  --cat-tint-mix: 14%;
+}
+
+[data-theme='dark'] {
+  --cat-tint-mix: 20%;
+}
+
+[data-cat-color] {
+  --cat-chip-bg: color-mix(in srgb, var(--cat) var(--cat-tint-mix), var(--color-surface));
+}
+
+[data-cat-color='blue'] {
+  --cat: #2358c4;
+}
+[data-theme='dark'] [data-cat-color='blue'] {
+  --cat: #3987e5;
+}
+
+[data-cat-color='yellow'] {
+  --cat: #8a6d00;
+}
+[data-theme='dark'] [data-cat-color='yellow'] {
+  --cat: #c98500;
+}
+
+[data-cat-color='pink'] {
+  --cat: #bf2f78;
+}
+[data-theme='dark'] [data-cat-color='pink'] {
+  --cat: #d55181;
+}
+
+[data-cat-color='green'] {
+  --cat: #1f7a3e;
+}
+[data-theme='dark'] [data-cat-color='green'] {
+  --cat: #3aa14a;
+}
+
+[data-cat-color='violet'] {
+  --cat: #7a3fc4;
+}
+[data-theme='dark'] [data-cat-color='violet'] {
+  --cat: #9085e9;
+}
+
+[data-cat-color='orange'] {
+  --cat: #c4560c;
+}
+[data-theme='dark'] [data-cat-color='orange'] {
+  --cat: #d95926;
+}
+
+[data-cat-color='teal'] {
+  --cat: #00836f;
+}
+[data-theme='dark'] [data-cat-color='teal'] {
+  --cat: #1aa08a;
+}
+
+[data-cat-color='red'] {
+  --cat: #c0352b;
+}
+[data-theme='dark'] [data-cat-color='red'] {
+  --cat: #e66767;
+}
+
+[data-cat-color='amber'] {
+  --cat: #a85f00;
+}
+[data-theme='dark'] [data-cat-color='amber'] {
+  --cat: #d07a12;
+}
+
+[data-cat-color='lime'] {
+  --cat: #587a0e;
+}
+[data-theme='dark'] [data-cat-color='lime'] {
+  --cat: #7fa832;
+}
+
+[data-cat-color='cyan'] {
+  --cat: #0b7a9a;
+}
+[data-theme='dark'] [data-cat-color='cyan'] {
+  --cat: #1e9dc6;
+}
+
+[data-cat-color='indigo'] {
+  --cat: #4b45c8;
+}
+[data-theme='dark'] [data-cat-color='indigo'] {
+  --cat: #7a74e6;
+}
+
+[data-cat-color='brown'] {
+  --cat: #8a5a3c;
+}
+[data-theme='dark'] [data-cat-color='brown'] {
+  --cat: #a8754f;
+}
+
+[data-cat-color='slate'] {
+  --cat: #55646e;
+}
+[data-theme='dark'] [data-cat-color='slate'] {
+  --cat: #7f929d;
+}
