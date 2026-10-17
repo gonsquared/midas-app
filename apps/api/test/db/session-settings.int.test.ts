@@ -1,6 +1,6 @@
 import { afterAll, expect, it } from 'vitest';
 import { sql } from 'kysely';
-import { createDatabaseClient } from '../../src/platform/db/client.js';
+import { createDatabaseClient, createOwnerDatabaseClient } from '../../src/platform/db/client.js';
 import { dbTestInfo, describeDb } from '../support/db.js';
 
 describeDb('pool session settings (real PostgreSQL)', () => {
@@ -26,6 +26,22 @@ describeDb('pool session settings (real PostgreSQL)', () => {
     expect(await show('TimeZone')).toBe('UTC');
     expect(await show('lock_timeout')).toBe('5s');
     expect(await show('idle_in_transaction_session_timeout')).toBe('1min');
+  });
+
+  it('gives the owner CLI client (seed:*) a lock timeout and UTC on top of its own options', async () => {
+    // Same shape as loadMigrationConnection(): statement_timeout disabled for owner tasks.
+    const owner = createOwnerDatabaseClient({
+      connectionString: info?.ownerUrl ?? '',
+      options: '-c statement_timeout=0',
+    });
+    try {
+      const { rows } = await sql<{ lt: string; tz: string; st: string }>`
+        SELECT current_setting('lock_timeout') AS lt, current_setting('TimeZone') AS tz,
+               current_setting('statement_timeout') AS st`.execute(owner.db);
+      expect(rows[0]).toEqual({ lt: '5s', tz: 'UTC', st: '0' });
+    } finally {
+      await owner.db.destroy();
+    }
   });
 
   it('forwards idle pool errors without crashing', () => {
