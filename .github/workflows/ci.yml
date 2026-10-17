@@ -91,11 +91,14 @@ jobs:
             exit 1
           fi
 
-      - name: Apply migrations to a scratch database
+      - name: Apply migrations and the system seed (twice, to prove idempotency) to a scratch database
         env:
           DATABASE_URL: postgres://postgres:ci-not-a-secret@localhost:5432/midas
           DATABASE_MIGRATION_URL: postgres://postgres:ci-not-a-secret@localhost:5432/midas
-        run: pnpm --filter @midas/api migrate
+        run: |
+          pnpm --filter @midas/api migrate
+          pnpm --filter @midas/api seed:system
+          pnpm --filter @midas/api seed:system
 
       - name: Check generated database types are up to date
         env:
