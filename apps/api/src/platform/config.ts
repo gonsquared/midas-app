@@ -1,5 +1,6 @@
 import type { ClientConfig } from 'pg';
 import { z } from 'zod';
+import { DEFAULT_RATE_LIMIT_MAX_KEYS } from './rate-limit.js';
 
 const emptyToUndefined = (value: unknown) =>
   typeof value === 'string' && value.trim() === '' ? undefined : value;
@@ -27,6 +28,7 @@ const databaseUrl = z
   });
 
 const NODE_ENVS = ['development', 'test', 'production'] as const;
+export const MAIL_TRANSPORTS = ['smtp', 'console', 'memory'] as const;
 const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const;
 
 const EnvSchema = z.object({
@@ -54,7 +56,60 @@ const EnvSchema = z.object({
   RATE_LIMIT_ENABLED: z.preprocess(emptyToUndefined, booleanFlag.default(true)),
   RATE_LIMIT_REGISTER_MAX: positiveInt(5),
   RATE_LIMIT_REGISTER_WINDOW_SECONDS: positiveInt(3600),
+  // Defaults follow architecture 9. Windows are fixed per endpoint; only the maximums are tunable.
+  RATE_LIMIT_LOGIN_MAX: positiveInt(5), // per IP + email, per minute
+  RATE_LIMIT_LOGIN_IP_MAX: positiveInt(20), // per IP, per minute
+  RATE_LIMIT_LOGIN_ACCOUNT_MAX: positiveInt(20), // per account (email hash) across all IPs, per hour
+  RATE_LIMIT_FORGOT_EMAIL_MAX: positiveInt(3), // per email hash, per hour
+  RATE_LIMIT_FORGOT_IP_MAX: positiveInt(10), // per IP, per hour
+  RATE_LIMIT_RESET_MAX: positiveInt(10), // per IP, per hour
+  RATE_LIMIT_REFRESH_MAX: positiveInt(30), // per session (or IP when no cookie), per minute
+  RATE_LIMIT_PASSWORD_CHANGE_MAX: positiveInt(10), // per user, per hour
+  RATE_LIMIT_USER_WRITE_MAX: positiveInt(120), // authenticated writes, per user, per minute
+  RATE_LIMIT_USER_READ_MAX: positiveInt(600), // authenticated reads, per user, per minute
+  RATE_LIMIT_GLOBAL_IP_MAX: positiveInt(1200), // all /api requests, per IP, per minute
+  // Capacity of each limiter's private in-memory store (LRU, one store per limiter).
+  RATE_LIMIT_STORE_MAX_KEYS: positiveInt(DEFAULT_RATE_LIMIT_MAX_KEYS, 1_000_000),
+
+  MAIL_TRANSPORT: optional(z.enum(MAIL_TRANSPORTS)),
+  MAIL_FROM: z.preprocess(
+    emptyToUndefined,
+    z.string().min(3).max(254).default('Midas <no-reply@localhost>'),
+  ),
+  SMTP_HOST: z.preprocess(emptyToUndefined, z.string().min(1).max(253).default('localhost')),
+  SMTP_PORT: positiveInt(1025, 65535),
+  SMTP_SECURE: z.preprocess(emptyToUndefined, booleanFlag.default(false)),
+  SMTP_USER: optional(z.string().max(254)),
+  SMTP_PASSWORD: optional(z.string().max(1024)),
+
+  // Comma-separated browser origins allowed in development; ignored in production (same origin).
+  CORS_ORIGINS: z.preprocess(emptyToUndefined, z.string().max(2048).optional()),
 });
+
+/** An origin is scheme://host[:port] with nothing else; `*` is never accepted. */
+function parseOrigins(raw: string | undefined): { origins: string[]; invalid: boolean } {
+  if (!raw) return { origins: [], invalid: false };
+  const origins: string[] = [];
+  for (const part of raw.split(',')) {
+    const value = part.trim();
+    if (value === '') continue;
+    let parsed: URL;
+    try {
+      parsed = new URL(value);
+    } catch {
+      return { origins: [], invalid: true };
+    }
+    if (
+      (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+      parsed.origin !== value.replace(/\/$/, '') ||
+      value.endsWith('/')
+    ) {
+      return { origins: [], invalid: true };
+    }
+    origins.push(parsed.origin);
+  }
+  return { origins, invalid: false };
+}
 
 export interface Config {
   env: (typeof NODE_ENVS)[number];
@@ -84,7 +139,31 @@ export interface Config {
     enabled: boolean;
     registerMax: number;
     registerWindowSeconds: number;
+    loginMax: number;
+    loginIpMax: number;
+    loginAccountMax: number;
+    forgotEmailMax: number;
+    forgotIpMax: number;
+    resetMax: number;
+    refreshMax: number;
+    passwordChangeMax: number;
+    userWriteMax: number;
+    userReadMax: number;
+    globalIpMax: number;
+    maxKeys: number;
   };
+  mail: {
+    transport: (typeof MAIL_TRANSPORTS)[number];
+    from: string;
+    smtp: {
+      host: string;
+      port: number;
+      secure: boolean;
+      user: string | undefined;
+      password: string | undefined;
+    };
+  };
+  cors: { origins: string[] };
 }
 
 export class ConfigError extends Error {
@@ -117,9 +196,31 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (e.SESSION_ABSOLUTE_TTL_DAYS < e.REFRESH_TOKEN_TTL_DAYS) {
     problems.push('SESSION_ABSOLUTE_TTL_DAYS: must be >= REFRESH_TOKEN_TTL_DAYS');
   }
+  if (e.NODE_ENV === 'production') {
+    // Reset links are built from this value, so it must be set explicitly and be https.
+    const raw = typeof env.APP_BASE_URL === 'string' ? env.APP_BASE_URL.trim() : '';
+    if (raw === '') {
+      problems.push('APP_BASE_URL: is required in production');
+    } else if (new URL(e.APP_BASE_URL).protocol !== 'https:') {
+      problems.push('APP_BASE_URL: must use https in production');
+    }
+  }
+  const mailTransport = e.MAIL_TRANSPORT ?? (e.NODE_ENV === 'test' ? 'memory' : 'smtp');
+  if (e.NODE_ENV === 'production' && mailTransport !== 'smtp') {
+    problems.push('MAIL_TRANSPORT: must be "smtp" in production');
+  }
+  const cors = parseOrigins(e.CORS_ORIGINS);
+  if (cors.invalid) {
+    problems.push(
+      'CORS_ORIGINS: must be a comma-separated list of http(s) origins without paths or wildcards',
+    );
+  }
   if (problems.length > 0) throw new ConfigError(problems);
 
   const warnings: string[] = [];
+  if (e.NODE_ENV === 'production' && cors.origins.length > 0) {
+    warnings.push('CORS_ORIGINS is ignored in production (the SPA is served from the API origin)');
+  }
   if (e.DATABASE_SSL === 'require') {
     warnings.push(
       'DATABASE_SSL=require encrypts the connection but does not verify the server certificate; use verify-full',
@@ -153,7 +254,31 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       enabled: e.RATE_LIMIT_ENABLED,
       registerMax: e.RATE_LIMIT_REGISTER_MAX,
       registerWindowSeconds: e.RATE_LIMIT_REGISTER_WINDOW_SECONDS,
+      loginMax: e.RATE_LIMIT_LOGIN_MAX,
+      loginIpMax: e.RATE_LIMIT_LOGIN_IP_MAX,
+      loginAccountMax: e.RATE_LIMIT_LOGIN_ACCOUNT_MAX,
+      forgotEmailMax: e.RATE_LIMIT_FORGOT_EMAIL_MAX,
+      forgotIpMax: e.RATE_LIMIT_FORGOT_IP_MAX,
+      resetMax: e.RATE_LIMIT_RESET_MAX,
+      refreshMax: e.RATE_LIMIT_REFRESH_MAX,
+      passwordChangeMax: e.RATE_LIMIT_PASSWORD_CHANGE_MAX,
+      userWriteMax: e.RATE_LIMIT_USER_WRITE_MAX,
+      userReadMax: e.RATE_LIMIT_USER_READ_MAX,
+      globalIpMax: e.RATE_LIMIT_GLOBAL_IP_MAX,
+      maxKeys: e.RATE_LIMIT_STORE_MAX_KEYS,
     },
+    mail: {
+      transport: mailTransport,
+      from: e.MAIL_FROM,
+      smtp: {
+        host: e.SMTP_HOST,
+        port: e.SMTP_PORT,
+        secure: e.SMTP_SECURE,
+        user: e.SMTP_USER,
+        password: e.SMTP_PASSWORD,
+      },
+    },
+    cors: { origins: e.NODE_ENV === 'production' ? [] : cors.origins },
   };
 }
 

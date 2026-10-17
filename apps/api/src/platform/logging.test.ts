@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { serializeError } from './logging.js';
+import { redactUrl, serializeError } from './logging.js';
 
 describe('serializeError', () => {
   it('keeps only allowlisted fields of a pg error', () => {
@@ -32,5 +32,18 @@ describe('serializeError', () => {
       message: 'bad',
     });
     expect(serializeError('x')).toEqual({ type: 'NonError', message: 'x', stack: '' });
+  });
+});
+
+describe('redactUrl', () => {
+  it('drops query values and keeps names', () => {
+    expect(redactUrl('/api/v1/transactions?q=salary%20acme&limit=20')).toBe(
+      '/api/v1/transactions?q=[redacted]&limit=[redacted]',
+    );
+    expect(redactUrl('/api/v1/x?flag')).toBe('/api/v1/x?flag=[redacted]');
+  });
+  it('leaves URLs without a query alone', () => {
+    expect(redactUrl('/api/v1/wallets')).toBe('/api/v1/wallets');
+    expect(redactUrl('/api/v1/wallets?')).toBe('/api/v1/wallets');
   });
 });

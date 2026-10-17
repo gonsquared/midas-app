@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ConfigError, loadConfig, loadMigrationConnection } from './config.js';
 
+const PROD_URL = 'https://midas.example.com';
 const base = {
   DATABASE_URL: 'postgres://u:p@localhost:5432/midas',
   JWT_ACCESS_SECRET: 'x'.repeat(48),
@@ -27,7 +28,7 @@ describe('loadConfig', () => {
   });
 
   it('defaults database TLS to verify-full in production', () => {
-    const config = loadConfig({ ...base, NODE_ENV: 'production' });
+    const config = loadConfig({ ...base, NODE_ENV: 'production', APP_BASE_URL: PROD_URL });
     expect(config.database.ssl).toBe('verify-full');
   });
 
@@ -58,6 +59,7 @@ describe('loadConfig', () => {
       loadConfig({
         ...base,
         NODE_ENV: 'production',
+        APP_BASE_URL: PROD_URL,
         JWT_ACCESS_SECRET: 'change-me-generate-a-long-random-value-0123456789',
       }),
     ).toThrow(/placeholder/);
@@ -80,10 +82,22 @@ describe('loadConfig', () => {
     );
   });
 
-  it('rejects DATABASE_SSL=off in production but allows it elsewhere', () => {
-    expect(() => loadConfig({ ...base, NODE_ENV: 'production', DATABASE_SSL: 'off' })).toThrow(
-      /DATABASE_SSL/,
+  it('requires APP_BASE_URL in production, over https', () => {
+    const prod = { ...base, NODE_ENV: 'production' };
+    expect(() => loadConfig(prod)).toThrow(/APP_BASE_URL: is required in production/);
+    expect(() => loadConfig({ ...prod, APP_BASE_URL: '' })).toThrow(/APP_BASE_URL/);
+    expect(() => loadConfig({ ...prod, APP_BASE_URL: 'http://midas.example.com' })).toThrow(
+      /APP_BASE_URL: must use https/,
     );
+    expect(loadConfig({ ...prod, APP_BASE_URL: PROD_URL }).appBaseUrl).toBe(PROD_URL);
+    // Development keeps the localhost default over http.
+    expect(loadConfig(base).appBaseUrl).toBe('http://localhost:5173');
+  });
+
+  it('rejects DATABASE_SSL=off in production but allows it elsewhere', () => {
+    expect(() =>
+      loadConfig({ ...base, NODE_ENV: 'production', APP_BASE_URL: PROD_URL, DATABASE_SSL: 'off' }),
+    ).toThrow(/DATABASE_SSL/);
     expect(loadConfig({ ...base, DATABASE_SSL: 'off' }).database.ssl).toBe('off');
   });
 
@@ -148,5 +162,76 @@ describe('loadMigrationConnection', () => {
 
   it('fails when no database URL is set', () => {
     expect(() => loadMigrationConnection({})).toThrow(ConfigError);
+  });
+});
+
+describe('loadConfig: mail, CORS and per-endpoint rate limits', () => {
+  it('defaults to the SMTP transport (Mailpit on localhost) and the memory sink under NODE_ENV=test', () => {
+    const dev = loadConfig(base);
+    expect(dev.mail).toMatchObject({
+      transport: 'smtp',
+      smtp: { host: 'localhost', port: 1025, secure: false },
+    });
+    expect(loadConfig({ ...base, NODE_ENV: 'test' }).mail.transport).toBe('memory');
+  });
+
+  it('refuses the console and memory mail transports in production', () => {
+    for (const transport of ['console', 'memory']) {
+      expect(() =>
+        loadConfig({
+          ...base,
+          NODE_ENV: 'production',
+          APP_BASE_URL: PROD_URL,
+          JWT_ACCESS_SECRET: 'x'.repeat(48),
+          MAIL_TRANSPORT: transport,
+        }),
+      ).toThrow(/MAIL_TRANSPORT/);
+    }
+  });
+
+  it('parses CORS_ORIGINS as a list of origins and rejects paths and wildcards', () => {
+    expect(
+      loadConfig({ ...base, CORS_ORIGINS: 'http://localhost:5173, https://app.example.com' }).cors
+        .origins,
+    ).toEqual(['http://localhost:5173', 'https://app.example.com']);
+    expect(loadConfig({ ...base, CORS_ORIGINS: '' }).cors.origins).toEqual([]);
+    expect(() => loadConfig({ ...base, CORS_ORIGINS: '*' })).toThrow(/CORS_ORIGINS/);
+    expect(() => loadConfig({ ...base, CORS_ORIGINS: 'http://x.test/path' })).toThrow(
+      /CORS_ORIGINS/,
+    );
+  });
+
+  it('ignores CORS_ORIGINS in production (same origin) and warns', () => {
+    const config = loadConfig({
+      ...base,
+      NODE_ENV: 'production',
+      APP_BASE_URL: PROD_URL,
+      JWT_ACCESS_SECRET: 'x'.repeat(48),
+      CORS_ORIGINS: 'https://other.example.com',
+    });
+    expect(config.cors.origins).toEqual([]);
+    expect(config.warnings.join()).toMatch(/CORS_ORIGINS/);
+  });
+
+  it('has the architecture default rate limits', () => {
+    expect(loadConfig(base).rateLimit).toMatchObject({
+      loginMax: 5,
+      loginIpMax: 20,
+      forgotEmailMax: 3,
+      forgotIpMax: 10,
+      resetMax: 10,
+      refreshMax: 30,
+      userWriteMax: 120,
+      userReadMax: 600,
+      loginAccountMax: 20,
+      maxKeys: 25_000,
+    });
+  });
+
+  it('reads the per-account login limit and store size from the environment', () => {
+    expect(
+      loadConfig({ ...base, RATE_LIMIT_LOGIN_ACCOUNT_MAX: '7', RATE_LIMIT_STORE_MAX_KEYS: '999' })
+        .rateLimit,
+    ).toMatchObject({ loginAccountMax: 7, maxKeys: 999 });
   });
 });

@@ -27,3 +27,37 @@ export function serializeError(error: unknown): SerializedError {
   }
   return { type: 'NonError', message: String(error), stack: '' };
 }
+
+/**
+ * Keeps the path and the parameter names of a request URL but drops every query value, because
+ * search terms (`q`), tokens and other values can be personal or secret.
+ */
+export function redactUrl(url: string): string {
+  const queryStart = url.indexOf('?');
+  if (queryStart === -1) return url;
+  const names = url
+    .slice(queryStart + 1)
+    .split('&')
+    .filter((pair) => pair !== '')
+    .map((pair) => `${pair.split('=')[0] ?? ''}=[redacted]`);
+  return names.length > 0
+    ? `${url.slice(0, queryStart)}?${names.join('&')}`
+    : url.slice(0, queryStart);
+}
+
+/** Request serializer for the `req` key (same fields as Fastify's default, with a redacted URL). */
+export function serializeRequest(request: {
+  method?: string;
+  url?: string;
+  host?: string;
+  ip?: string;
+  socket?: { remotePort?: number | undefined };
+}): Record<string, unknown> {
+  return {
+    method: request.method,
+    url: request.url === undefined ? undefined : redactUrl(request.url),
+    host: request.host,
+    remoteAddress: request.ip,
+    remotePort: request.socket?.remotePort,
+  };
+}
