@@ -11,7 +11,7 @@ async function main(): Promise<void> {
   });
   const app = await buildApp({ config, db });
   poolLog.warn = (obj, msg) => app.log.warn(obj, msg);
-  for (const warning of config.warnings) app.log.warn({ config: 'DATABASE_SSL' }, warning);
+  for (const warning of config.warnings) app.log.warn({ config: 'startup' }, warning);
 
   let closing = false;
   const shutdown = async (signal: string) => {
