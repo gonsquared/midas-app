@@ -461,5 +461,4 @@ Requirement IDs use `REQ-<epic>.<feature>.<seq>`. Epic and feature numbers follo
 | --- | --- | --- | --- |
 | 1.0 | 2026-10-16 | docs-agent | Initial specification derived from the project brief, architecture, API contract, database design, UI design and dev stories tracker. |
 | 1.1 | 2026-10-18 | docs-agent | Sprint 2 update. Added implementation status and deferral notes to section 4. Added REQ-2.2.8 to 2.2.10, REQ-5.1.3, REQ-5.2.7; clarified REQ-2.2.4, 3.2.3, 5.2.3. Added NFR-S-8 and NFR-D-3; updated NFR-S-2. Recorded Sprint 2 decisions (ADR-008 explicit toAmountMinor, `<sid>.<random>` refresh token, native controls under strict CSP, single-currency amount filter, URL-driven composer). Deferred SPA-from-API and CSP e2e to Sprint 4. Updated constraints, rendering note and glossary. |
-
 | 1.2 | 2026-10-19 | docs-agent | Sprint 3 update. Implementation status now covers CSV export, budgets, dashboard and reports, recurring transactions and admin; known gaps listed. |
