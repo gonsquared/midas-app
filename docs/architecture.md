@@ -413,9 +413,9 @@ E1-F2-S3, E2-F1-S1, E3-F1-S1, E4-F1-S1, E5-F1-S1, E6-F1-S1, E8-F1-S1 and E9-F1-S
 
 ### First admin (ADR-013)
 
-- Primary: `pnpm --filter @midas/api cli admin:create --email <email>`. It prompts for the password, or reads it from stdin with `--password-stdin`, and is idempotent. In Docker: `docker compose exec api node dist/cli.js admin:create …`.
-- `cli admin:promote --email <email>` promotes an existing user.
-- Fallback for hosts without shell access: if `BOOTSTRAP_ADMIN_EMAIL` is set **and no admin exists**, the first boot after that user registers promotes them once. The operator registers first, then sets the variable, then removes it. Bootstrap is skipped as soon as any admin exists.
+- Primary: `pnpm --filter @midas/api cli admin:create --email <email>`. It creates a new account only (it fails if the email exists), prompts for the password, or reads it from stdin with `--password-stdin`. In Docker: `docker compose exec api node dist/cli.js admin:create …`.
+- `cli admin:promote --email <email>` promotes an existing user (explicit operator action, audited). Existing accounts are never promoted implicitly because registration does not verify email.
+- Fallback for hosts without shell access: if `BOOTSTRAP_ADMIN_EMAIL` is set **and no admin exists**, the first boot creates that account as admin with an unusable random password; the owner sets a password with "Forgot password". If an account with that email already exists, boot logs an error and promotes nothing (use `admin:promote`). Bootstrap is skipped as soon as any admin exists.
 - All paths write `system.admin_bootstrapped` or `admin.user_role_changed` to the audit log with a null actor (system).
 - There is no "first registered user becomes admin" behavior, which would be a race on public deployments.
 
@@ -736,7 +736,8 @@ Each entry: **Status · Context · Decision · Alternatives rejected · Conseque
 
 ### ADR-013: First admin via CLI, with a one-time bootstrap setting as fallback
 
-- **Decision:** `cli admin:create` and `cli admin:promote` (audit-logged); optional `BOOTSTRAP_ADMIN_EMAIL` that promotes an existing user once, and only while no admin exists.
+- **Decision:** `cli admin:create` creates a new admin account and `cli admin:promote` is the explicit, audit-logged way to promote an existing one; optional `BOOTSTRAP_ADMIN_EMAIL` creates its own account once, and only while no admin exists.
+- **Amendment (code review H-1):** registration does not verify email ownership, so matching an account by email alone must never grant admin. A person could register the operator's email first and keep a known password. Therefore: `admin:create` fails when the email exists (the check and the insert run in one transaction under the admin-set lock, backed by the unique email index, so a concurrent registration cannot make it silently drop the supplied password); `BOOTSTRAP_ADMIN_EMAIL` never promotes an existing account (it logs an error and does nothing) and otherwise creates the account with a random unusable password, which the owner replaces through the password-reset email; `admin:promote` stays an operator action with shell access and writes `admin.user_role_changed`.
 - **Alternatives rejected:** first registered user becomes admin (race on public deployments); seeding admin credentials from environment variables (a plaintext password in host config); a database migration with a fixed admin (a secret in the repository).
 - **Consequences:** an operator step is required after the first deploy, and the deployment guide documents it.
 

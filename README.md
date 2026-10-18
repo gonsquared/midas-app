@@ -2,8 +2,8 @@
 
 A personal finance tracker for recording income, expenses and transfers across multiple wallets, planning spending with budgets, automating regular items, and understanding your money through a dashboard and reports.
 
-> **Status: Sprint 2 (Core Features) implemented; Sprint 3 and 4 not started.**
-> Implemented: pnpm monorepo, CI, Docker Compose stack, design system, database migrations, and the Sprint 2 features (registration, login and sessions, password reset, profile and settings, wallets, categories, transactions, transfers) in both the API and the web app. Export, budgets, dashboard, recurring transactions and admin are planned for Sprint 3. Architecture decisions are in [docs/adr/](./docs/adr/README.md); the full documentation map is [docs/README.md](./docs/README.md).
+> **Status: Sprint 2 (Core Features) implemented; Sprint 3 (Secondary Features) implemented in the API and the web app and through the QA gate; Sprint 4 not started.**
+> Implemented: pnpm monorepo, CI, Docker Compose stack, design system, database migrations, and the Sprint 2 features (registration, login and sessions, password reset, profile and settings, wallets, categories, transactions, transfers) in both the API and the web app. Sprint 3 adds CSV export, budgets with overspend warnings, the dashboard and reports (charts with table alternatives, date-range selector), recurring transactions, and the admin area (users, default categories, platform metrics, audit log) in both the API and the web app. Architecture decisions are in [docs/adr/](./docs/adr/README.md); the full documentation map is [docs/README.md](./docs/README.md).
 
 ## Features (planned for v1)
 
@@ -31,7 +31,7 @@ Out of scope for v1: bank syncing, shared wallets, receipt OCR, native mobile ap
 | Testing | Vitest, Testcontainers |
 | Delivery | Docker, Docker Compose, GitHub Actions |
 
-The web app also uses TanStack Router and Query; browser tests use Playwright (`e2e/`) and component tests use vitest-axe. Recharts is planned for the Sprint 3 dashboard and is not a dependency yet.
+The web app also uses TanStack Router and Query; browser tests use Playwright (`e2e/`) and component tests use vitest-axe. Charts use Recharts (SVG only, animation off, no injected `<style>`), loaded lazily; `e2e/tests/csp.spec.ts` checks them under a strict CSP against a production build (opt-in, see the file header).
 
 ## Architecture summary
 
@@ -194,28 +194,59 @@ pnpm test:e2e                   # Playwright against the Vite dev server with a 
 | `SMTP_SECURE` | no | `false` | `true` = implicit TLS (port 465). In production with `false`, STARTTLS is required and the server certificate is verified; local dev (Mailpit) stays plaintext |
 | `SMTP_USER`, `SMTP_PASSWORD` | no | none | SMTP credentials |
 | `CORS_ORIGINS` | no | none | Development only. Comma-separated `scheme://host[:port]` origins, no paths or wildcards; invalid values fail boot. Ignored in production (same-origin SPA, no CORS headers) |
-| `DATABASE_MAINTENANCE_URL`, `AUDIT_RETENTION_DAYS`, `AUDIT_HMAC_SECRET`, `SEED_DEMO_PASSWORD`, `SCHEDULER_*`, `RECURRING_*`, `METRICS_TOKEN`, `BOOTSTRAP_ADMIN_EMAIL` | no | see `.env.example` | Listed for later sprints; not read by the config module yet |
+| `RATE_LIMIT_EXPORT_MAX` | no | `10` | CSV exports per user, per minute |
+| `SCHEDULER_ENABLED` | no | `true` | Run the in-process scheduler (recurring generation, daily housekeeping). Safe to leave on for several instances |
+| `SCHEDULER_INTERVAL_SECONDS` | no | `300` | Pause between passes, 1 to 86400 |
+| `RECURRING_MAX_CATCHUP` | no | `31` | Most occurrences generated per template per pass (max 366) |
+| `RECURRING_MAX_FAILURES` | no | `5` | Consecutive failures after which a template is paused (max 100) |
+| `METRICS_TOKEN` | no | none | At least 32 characters from `A-Za-z0-9._~+/=-`; enables `GET /metrics`. `change-me` placeholders rejected outside `NODE_ENV=test` |
+| `AUDIT_HMAC_SECRET` | no | none | At least 32 characters; pseudonymizes the email of failed sign-ins for unknown accounts in the audit log. Without it those rows carry no email hash (a warning is logged in production) |
+| `BOOTSTRAP_ADMIN_EMAIL` | no | none | One-time: while no admin exists, creates this account as admin at boot with an unusable password (set a real one with "Forgot password"). Refuses, with an error log, if the email already has an account. Remove it afterwards |
+| `EXPORT_MAX_DURATION_SECONDS` | no | `300` | Absolute time cap per CSV export; a slower download is aborted |
+| `DATABASE_MAINTENANCE_URL`, `AUDIT_RETENTION_DAYS`, `SEED_DEMO_PASSWORD` | no | see `.env.example` | Listed for later work (audit purge, dev seed); not read by the config module yet |
 | `E2E_BASE_URL`, `E2E_REAL_API`, `E2E_MAIL_LOG` | no | none | Playwright only, see Checks and tests |
 
 The web dev server also reads `VITE_DEV_HOST` (see [CONTRIBUTING.md](./CONTRIBUTING.md)).
 
 ## API
 
-Base path `/api/v1`. Request and response shapes, the error format, pagination and the endpoint index are in the OpenAPI 3.1 draft, [apps/api/openapi/openapi.yaml](./apps/api/openapi/openapi.yaml), which also lists Sprint 3 endpoints that are not implemented yet; each operation is tagged `x-implementation-status` (implemented or planned), and a test keeps it in sync with the registered routes.
+Base path `/api/v1`. Request and response shapes, the error format, pagination and the endpoint index are in the OpenAPI 3.1 draft, [apps/api/openapi/openapi.yaml](./apps/api/openapi/openapi.yaml), each operation is tagged `x-implementation-status` (implemented or planned), and a test keeps it in sync with the registered routes.
 
-Implemented (Sprint 2):
+Implemented (Sprint 2 and Sprint 3):
 
 | Area | Endpoints |
 | --- | --- |
-| Ops | `GET /health` (liveness, database readiness, `APP_VERSION`) |
+| Ops | `GET /health` (liveness, database readiness, `APP_VERSION`); `GET /metrics` (Prometheus text, `Authorization: Bearer <METRICS_TOKEN>`, 404 while `METRICS_TOKEN` is unset; at the root, not under `/api`) |
 | Auth | `POST /auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/password/forgot`, `/auth/password/reset/verify`, `/auth/password/reset` |
 | Me | `GET /me`, `PATCH /me`, `POST /me/password` |
 | Wallets | `GET, POST /wallets`; `GET, PATCH, DELETE /wallets/{walletId}`; `POST /wallets/{walletId}/archive` and `/unarchive` |
 | Categories | `GET, POST /categories`; `PATCH, DELETE /categories/{categoryId}` |
-| Transactions | `GET, POST /transactions`; `GET, PATCH, DELETE /transactions/{transactionId}` |
+| Transactions | `GET, POST /transactions`; `GET /transactions/export` (streamed CSV, formula-injection safe, 10 per minute per user); `GET, PATCH, DELETE /transactions/{transactionId}` |
 | Transfers | `POST /transfers`; `GET, PATCH, DELETE /transfers/{transferId}` |
+| Budgets | `GET, POST /budgets`; `GET, PATCH, DELETE /budgets/{budgetId}`. Status (spent, remaining, percent, `ok`/`warning`/`exceeded`) is computed on read for the period that contains `?date` |
+| Reports | `GET /reports/summary`, `/reports/trend`, `/reports/category-breakdown` (per currency, transfers excluded) |
+| Recurring | `GET, POST /recurring-templates`; `POST /recurring-templates/preview`; `GET, PATCH, DELETE /recurring-templates/{templateId}`; `POST .../pause` and `.../resume`; `GET .../runs` |
+| Admin | `GET /admin/users`, `GET /admin/users/{userId}`, `POST .../suspend` and `.../reactivate`, `PATCH .../role`; `GET, POST /admin/categories`, `PATCH /admin/categories/{categoryId}`, `POST .../retire` and `.../restore`; `GET /admin/metrics`; `GET /admin/audit-logs`. Admin only (role read from the database on every request); none of them returns financial data |
 
-Authenticated routes expect `Authorization: Bearer <access token>`; the refresh token travels only in the `midas_rt` cookie. Not implemented yet: transaction CSV export, budgets, reports, recurring templates, admin, `/metrics`.
+Authenticated routes expect `Authorization: Bearer <access token>`; the refresh token travels only in the `midas_rt` cookie.
+
+Report ranges default to the current calendar month in the user's time zone; a missing `from` or `to` takes that month's bound, and a range that ends up inverted is a `400`.
+
+### Command line and background work
+
+```bash
+pnpm --filter @midas/api cli admin:create --email you@example.com [--display-name Name] [--password-stdin]
+pnpm --filter @midas/api cli admin:promote --email you@example.com
+pnpm --filter @midas/api cli jobs:run recurring     # one generation pass, then exit (for cron hosts)
+```
+
+- **First admin (ADR-013):** `admin:create` creates a NEW admin account: it prompts for the password (hidden) or reads one line from stdin with `--password-stdin`, and fails if the email already has an account (registration does not verify email ownership, so an existing account is never promoted by email alone). To make an existing account admin, run `admin:promote --email <email>` as an explicit operator action; it writes an `admin.user_role_changed` audit row. `BOOTSTRAP_ADMIN_EMAIL` creates the account itself at boot, only while no admin exists, with a random unusable password; the owner then uses "Forgot password" (proof of mailbox control). If that email already has an account, boot logs an error and promotes nothing. Unset it afterwards. Nobody becomes admin by registering.
+- **Export limits:** one concurrent CSV export per user (a second gets 429), a process-wide cap, and an absolute time cap (`EXPORT_MAX_DURATION_SECONDS`). If an export fails or is cut off after the 200 header was sent, the server destroys the connection so the client sees an aborted, truncated download instead of a clean 200 with a short file.
+- **Admin users list:** `page` is capped at 1000 (100,000 rows at `pageSize` 100); narrow with `q`, `role` or `status` to go deeper. `GET /admin/audit-logs` requires `targetType` whenever `targetId` is given.
+- **Audit request ids:** `audit_logs.request_id` is always generated by the server; the client `X-Request-Id` only correlates logs and the response header.
+- **Known gap (tracked TODO):** there is no retention purge yet for `audit_logs` (`db:purge-audit`) or `recurring_runs` (400 days). Both tables grow unbounded until it is built; see the Final Backlog Review in `docs/dev-stories-tracker.md`.
+- **Recurring scheduler (ADR-011):** with `SCHEDULER_ENABLED=true` the server runs a pass every `SCHEDULER_INTERVAL_SECONDS` (first pass about 5 seconds after start) and a daily housekeeping job. Passes claim due templates with row locks that skip locked rows and write one run row per occurrence (unique key), so several instances can run it safely. Catch-up: every missed occurrence is generated on its own date, at most `RECURRING_MAX_CATCHUP` per template per pass. A failed occurrence is recorded and retried on the next pass; after `RECURRING_MAX_FAILURES` in a row the template is paused. An archived wallet or retired category records a skipped run and pauses the template. On shutdown the scheduler stops between occurrences before the pool closes.
+- **Audit log:** auth events (register, sign-in success and failure, suspended sign-in, logout, token reuse, password reset and change) are written best-effort after the main work. Admin actions are written in the same transaction as the change. Metadata never holds passwords, tokens, amounts or notes; failed sign-ins for unknown emails store only an HMAC (`AUDIT_HMAC_SECRET`).
 
 ## Security notes
 
@@ -225,6 +256,9 @@ Authenticated routes expect `Authorization: Bearer <access token>`; the refresh 
 - **Rate limits:** fixed windows per endpoint (login per IP+email and per IP per minute, login per account per hour, forgot-password, reset, refresh, password change, per-user read/write, global per-IP). Only the maximums are tunable through `RATE_LIMIT_*`. Counters are in memory, one LRU store per limiter capped by `RATE_LIMIT_STORE_MAX_KEYS`, so they reset on restart and are not shared across instances. Set `TRUST_PROXY` correctly behind a reverse proxy, otherwise all clients share one IP.
 - **Per-account login limiter trade-off:** `RATE_LIMIT_LOGIN_ACCOUNT_MAX` caps attempts against one account from any IP, which blunts distributed credential stuffing, but an attacker who knows an email can send failing attempts to lock that account out of logging in until the hour window rolls over.
 - **Reset throttling trade-off:** forgot-password is throttled per email hash and per IP, so a third party can use up a victim's per-email allowance and delay the victim's own reset requests for the window. The exact response behaviour is defined by the `POST /api/v1/auth/password/forgot` operation in the OpenAPI draft.
+- **Admin boundary (ADR-018):** admin routes sit behind the normal authentication and a role check against the database row of the current request, so a demotion or suspension applies on the next call. Role changes and suspensions are serialized under an advisory lock (never the last active admin, never yourself) and audited in the same transaction. No admin endpoint returns or aggregates a user's wallets, transactions, budgets or templates; tests enumerate the routes and the API description to keep it that way.
+- **CSV export:** text cells that start with `=`, `+`, `-`, `@`, tab or carriage return get a leading `'`; amounts are plain signed decimals. The file is streamed from a read-only transaction through a server-side cursor with at most 3 exports running per process, and an abandoned download releases its connection.
+- **Metrics:** `/metrics` is disabled until `METRICS_TOKEN` is set, compares the token in constant time, is rate limited per IP, and labels requests with the matched route pattern only.
 - **Production checks (fail fast at boot):** `APP_BASE_URL` set and `https`; `MAIL_TRANSPORT=smtp`; `DATABASE_SSL=off` rejected; placeholder JWT secret rejected; SMTP must use STARTTLS (or `SMTP_SECURE=true`) with certificate verification.
 - Vulnerability reporting and secret handling: [SECURITY.md](./SECURITY.md).
 
@@ -239,7 +273,7 @@ Authenticated routes expect `Authorization: Bearer <access token>`; the refresh 
 | --- | --- | --- |
 | 1 | Foundation | Monorepo, CI, Docker, API and web skeletons, design system, migrations, registration (complete) |
 | 2 | Core Features (implemented) | Login and sessions, password reset, settings, wallets, categories, transactions, transfers |
-| 3 | Secondary Features | CSV export, budgets, dashboard and reports, recurring transactions, admin |
+| 3 | Secondary Features (implemented) | CSV export, budgets, dashboard and reports, recurring transactions, admin |
 | 4 | Quality and Release | Security hardening, accessibility, performance, deployment, documentation, v1.0 release |
 
 ## Contributing

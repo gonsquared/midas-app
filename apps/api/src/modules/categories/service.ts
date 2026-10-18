@@ -140,13 +140,19 @@ export class CategoryService {
       return await withTransaction(this.deps.db, async (trx) => {
         const categories = createCategoriesRepository(trx);
         await this.assertOwnCategory(categories, userId, categoryId);
+        // Lock order matches the recurring generator: templates, then the category.
+        await categories.lockReferencingTemplates(userId, categoryId);
         // FOR UPDATE blocks the key-share lock every new reference needs, so no ledger write can
         // add a reference between the reassignment below and the delete.
         const existing = await categories.lockOwned(userId, categoryId, 'update');
         if (!existing) throw notFound();
 
         let reassignedTransactions = 0;
-        if (await categories.isReferencedByTransactions(userId, categoryId)) {
+        let reassignedTemplates = 0;
+        const referenced =
+          (await categories.isReferencedByTransactions(userId, categoryId)) ||
+          (await categories.isReferencedByTemplates(userId, categoryId));
+        if (referenced) {
           if (reassignTo === undefined) throw inUse();
           // Key-share lock, as the reassignment's foreign key check would take: the target cannot
           // be deleted underneath the reassignment.
@@ -176,10 +182,12 @@ export class CategoryService {
             categoryId,
             reassignTo,
           );
+          reassignedTemplates = await categories.reassignTemplates(userId, categoryId, reassignTo);
         }
-        // Recurring templates and budgets are reassigned and deleted here once E8 and E6 add them.
+        // Budgets scoped to this category are deleted with it (api-contract 7).
+        const deletedBudgets = await categories.deleteBudgets(userId, categoryId);
         await categories.delete(categoryId, userId);
-        return { reassignedTransactions, reassignedTemplates: 0, deletedBudgets: 0 };
+        return { reassignedTransactions, reassignedTemplates, deletedBudgets };
       });
     } catch (error) {
       throw this.mapError(error);

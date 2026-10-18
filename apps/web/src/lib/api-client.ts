@@ -78,8 +78,19 @@ export interface ApiClientDeps {
   onSessionExpired?: () => void;
 }
 
+export interface ApiDownload {
+  blob: Blob;
+  /** Name from Content-Disposition, reduced to a safe file name; undefined when absent or odd. */
+  filename: string | undefined;
+}
+
 export interface ApiClient {
   request: <T = unknown>(path: string, options?: RequestOptions<T>) => Promise<T>;
+  /** Authenticated GET that returns the body as a Blob (CSV export). Errors map like request. */
+  download: (
+    path: string,
+    options?: Omit<RequestOptions<never>, 'parser' | 'body'>,
+  ) => Promise<ApiDownload>;
   refresh: () => Promise<AuthSession | null>;
 }
 
@@ -170,6 +181,21 @@ export async function toApiError(response: Response): Promise<ApiError> {
   });
 }
 
+/**
+ * File name from a Content-Disposition header. Only a plain attachment name made of safe
+ * characters is accepted, so a server value can never smuggle a path into the download.
+ */
+export function parseFilename(header: string | null): string | undefined {
+  if (!header) return undefined;
+  // Anchored: a quoted name must close its quote, an unquoted one must end at ; or the end.
+  const match =
+    /(?:^|[;\s])filename=(?:"([A-Za-z0-9._-]{1,100})"|([A-Za-z0-9._-]{1,100}))\s*(?:;|$)/.exec(
+      header,
+    );
+  const name = match?.[1] ?? match?.[2];
+  return name && !name.startsWith('.') ? name : undefined;
+}
+
 export function createApiClient(deps: ApiClientDeps = {}): ApiClient {
   const baseUrl = deps.baseUrl ?? API_BASE_URL;
   const session = deps.session ?? defaultSessionStore;
@@ -236,7 +262,8 @@ export function createApiClient(deps: ApiClientDeps = {}): ApiClient {
     return refreshing;
   }
 
-  async function request<T = unknown>(path: string, options: RequestOptions<T> = {}): Promise<T> {
+  /** Sends the request, refreshes once on 401, and throws an ApiError for any non-2xx answer. */
+  async function execute(path: string, options: RequestOptions<unknown>): Promise<Response> {
     let response = await send(path, options);
 
     if (response.status === 401 && options.auth !== false) {
@@ -249,12 +276,26 @@ export function createApiClient(deps: ApiClientDeps = {}): ApiClient {
     }
 
     if (!response.ok) throw await toApiError(response);
+    return response;
+  }
 
+  async function request<T = unknown>(path: string, options: RequestOptions<T> = {}): Promise<T> {
+    const response = await execute(path, options);
     const body = await readJson(response);
     return (options.parser ? options.parser.parse(body) : body) as T;
   }
 
-  return { request, refresh };
+  async function download(
+    path: string,
+    options: Omit<RequestOptions<never>, 'parser' | 'body'> = {},
+  ): Promise<ApiDownload> {
+    // Accept is JSON by default; a file answer is fine because the server picks the type.
+    const response = await execute(path, options);
+    const blob = await response.blob();
+    return { blob, filename: parseFilename(response.headers.get('Content-Disposition')) };
+  }
+
+  return { request, download, refresh };
 }
 
 let sessionExpiredHandler: (() => void) | undefined;

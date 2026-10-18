@@ -18,6 +18,7 @@ import { formatDayHeading, todayLocalDate } from '@/lib/dates';
 import { usePreferences } from '@/lib/preferences';
 import { useTransactionList, useRecentTransactions } from './api';
 import { ActiveFilters } from './active-filters';
+import { ExportButton } from './export-button';
 import { useOverlays } from './composer-store';
 import { DeleteTransactionDialog } from './delete-transaction-dialog';
 import { FilterBar } from './filter-bar';
@@ -307,7 +308,10 @@ export function TransactionsPage() {
 
   return (
     <div>
-      <PageHeader title="Transactions" />
+      <div className="mb-8 flex flex-wrap items-start justify-between gap-4 [&>div:first-child]:mb-0">
+        <PageHeader title="Transactions" />
+        <ExportButton filters={filters} />
+      </div>
       {breakpoint === 'desktop' ? (
         <QuickAddBar
           wallets={walletList}

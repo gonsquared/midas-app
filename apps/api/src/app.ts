@@ -9,9 +9,19 @@ import Fastify, {
   type FastifyRequest,
 } from 'fastify';
 import type { Kysely } from 'kysely';
+import { adminCategoryRoutes } from './modules/admin/categories-routes.js';
+import { AdminCategoryService } from './modules/admin/categories-service.js';
+import { adminMetricsRoutes } from './modules/admin/metrics-routes.js';
+import { PlatformMetricsService } from './modules/admin/metrics-service.js';
+import { adminUserRoutes } from './modules/admin/users-routes.js';
+import { AdminUsersService } from './modules/admin/users-service.js';
+import { auditRoutes } from './modules/audit/routes.js';
+import { AuditService } from './modules/audit/service.js';
+import { budgetRoutes } from './modules/budgets/routes.js';
+import { BudgetService } from './modules/budgets/service.js';
 import { argon2Hasher, type PasswordHasher } from './modules/auth/password-hasher.js';
 import type { AuthRepositories, AuthUnitOfWork } from './modules/auth/repository.js';
-import { createAuthGuard } from './modules/auth/guard.js';
+import { createAuthGuard, requireAdminGuard } from './modules/auth/guard.js';
 import { PasswordService } from './modules/auth/password-service.js';
 import {
   createPasswordResetTokensRepository,
@@ -25,6 +35,11 @@ import { createAuthUnitOfWork } from './modules/auth/unit-of-work.js';
 import { CategoryService } from './modules/categories/service.js';
 import { categoryRoutes } from './modules/categories/routes.js';
 import { healthRoutes } from './modules/health/routes.js';
+import { metricsRoutes } from './modules/ops/routes.js';
+import { recurringRoutes } from './modules/recurring/routes.js';
+import { RecurringService } from './modules/recurring/service.js';
+import { reportRoutes } from './modules/reports/routes.js';
+import { ReportService } from './modules/reports/service.js';
 import { TransactionService } from './modules/transactions/service.js';
 import { transactionRoutes } from './modules/transactions/routes.js';
 import { TransferService } from './modules/transfers/service.js';
@@ -41,6 +56,7 @@ import { checkDatabase as probeDatabase } from './platform/db/health.js';
 import { AppError, buildProblem } from './platform/errors.js';
 import { serializeError, serializeRequest } from './platform/logging.js';
 import { createMailer, type Mailer } from './platform/mailer/mailer.js';
+import { MetricsRegistry } from './platform/metrics.js';
 import { createLimiter, ipKey } from './platform/rate-limit.js';
 
 /** Accepted inbound request id format (api-contract 1.6). */
@@ -60,6 +76,8 @@ export interface AppDeps {
   /** Test seam: lets tests wait for work that runs after the response (email). */
   background?: BackgroundTasks;
   checkDatabase?: () => Promise<boolean>;
+  /** Prometheus registry shared with the scheduler. Defaults to a fresh one. */
+  metrics?: MetricsRegistry;
   /** Test seam: capture structured log lines. */
   logStream?: { write(line: string): void };
 }
@@ -114,8 +132,24 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   });
 
   app.decorateRequest('auth', null);
+  app.decorateRequest('serverRequestId', '');
+
+  const metrics = deps.metrics ?? new MetricsRegistry();
+  // Labels use the matched route pattern (never the raw URL), so cardinality stays bounded.
+  app.addHook('onResponse', async (request, reply) => {
+    const route = request.routeOptions?.url ?? 'unmatched';
+    metrics.httpRequests.inc({
+      method: request.method,
+      route,
+      status: String(reply.statusCode),
+    });
+    metrics.httpDuration.observe({ method: request.method, route }, reply.elapsedTime / 1000);
+  });
 
   app.addHook('onRequest', async (request, reply) => {
+    // Audit rows use this server-generated id, never the client-supplied X-Request-Id.
+    request.serverRequestId = randomUUID();
+    request.log = request.log.child({ serverRequestId: request.serverRequestId });
     reply.header('X-Request-Id', request.id);
     // API responses carry personal financial data and tokens: never cache them.
     if (isApiRequest(request)) reply.header('Cache-Control', 'no-store');
@@ -256,6 +290,13 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     await background.drain();
   });
   const mailer = deps.mailer ?? createMailer(config, app.log);
+  const audit = new AuditService({
+    db: deps.db,
+    clock,
+    logger: app.log,
+    failures: metrics.auditWriteFailures,
+    hmacSecret: config.audit.hmacSecret,
+  });
 
   const authRepositories: AuthRepositories = deps.authRepositories ?? {
     users: createUsersRepository(deps.db),
@@ -276,6 +317,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     refreshTokenTtlDays: config.auth.refreshTokenTtlDays,
     sessionAbsoluteTtlDays: config.auth.sessionAbsoluteTtlDays,
     logger: app.log,
+    audit,
   });
   const passwordService = new PasswordService({
     unitOfWork,
@@ -286,6 +328,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     background,
     appBaseUrl: config.appBaseUrl,
     logger: app.log,
+    audit,
   });
 
   // Coarse per-IP ceiling over the whole API, before any route runs.
@@ -302,6 +345,19 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   // Public routes (each applies its own rate limits).
   authRoutes(app, { service: authService, passwords: passwordService, config });
+
+  // Prometheus scrape endpoint: its own credential (METRICS_TOKEN), a per-IP limit before it.
+  metricsRoutes(app, {
+    registry: metrics,
+    token: config.metricsToken,
+    limiter: createLimiter(app, {
+      name: 'metrics-ip',
+      max: config.rateLimit.globalIpMax,
+      windowSeconds: 60,
+      key: (request) => ipKey(request.ip),
+      maxKeys: config.rateLimit.maxKeys,
+    }),
+  });
 
   // Everything else lives in one scope whose hooks authenticate every request and apply the
   // per-user limits (architecture 9). A route added here cannot skip them.
@@ -333,8 +389,26 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     });
     walletRoutes(protectedScope, new WalletService({ db: deps.db, clock }));
     categoryRoutes(protectedScope, new CategoryService({ db: deps.db }));
-    transactionRoutes(protectedScope, new TransactionService({ db: deps.db }));
+    transactionRoutes(protectedScope, new TransactionService({ db: deps.db }), {
+      clock,
+      exportMax: config.rateLimit.exportMax,
+      exportMaxDurationMs: config.exportMaxDurationSeconds * 1000,
+      rateLimitKeys: config.rateLimit.maxKeys,
+    });
     transferRoutes(protectedScope, new TransferService({ db: deps.db }));
+    budgetRoutes(protectedScope, new BudgetService({ db: deps.db, clock }));
+    reportRoutes(protectedScope, new ReportService({ db: deps.db, clock }));
+    recurringRoutes(protectedScope, new RecurringService({ db: deps.db, clock }));
+
+    // Admin routes: authenticated first (parent hook), then the role check from the database row.
+    // No route in this scope reads financial data of any user (ADR-018).
+    await protectedScope.register(async (adminScope) => {
+      adminScope.addHook('onRequest', async (request) => requireAdminGuard(request));
+      adminUserRoutes(adminScope, new AdminUsersService({ db: deps.db, clock, audit }));
+      adminCategoryRoutes(adminScope, new AdminCategoryService({ db: deps.db, clock, audit }));
+      adminMetricsRoutes(adminScope, new PlatformMetricsService({ db: deps.db, clock }));
+      auditRoutes(adminScope, audit);
+    });
   });
 
   return app;

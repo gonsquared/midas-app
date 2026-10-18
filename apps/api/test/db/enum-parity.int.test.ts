@@ -1,5 +1,12 @@
 import {
+  AUDIT_TARGET_TYPES,
+  BUDGET_PERIODS,
+  BUDGET_SCOPES,
   CATEGORY_TYPES,
+  RECURRING_FREQUENCIES,
+  RECURRING_RUN_STATUSES,
+  RECURRING_STATUSES,
+  RECURRING_TYPES,
   ROLES,
   THEMES,
   TRANSACTION_TYPES,
@@ -21,6 +28,13 @@ const PAIRS: Array<[constraint: string, values: readonly string[]]> = [
   ['ck_categories__type', CATEGORY_TYPES],
   ['ck_transactions__type', TRANSACTION_TYPES],
   ['ck_transactions__transfer_direction', TRANSFER_DIRECTIONS],
+  ['ck_budgets__scope', BUDGET_SCOPES],
+  ['ck_budgets__period', BUDGET_PERIODS],
+  ['ck_recurring_templates__type', RECURRING_TYPES],
+  ['ck_recurring_templates__frequency', RECURRING_FREQUENCIES],
+  ['ck_recurring_templates__status', RECURRING_STATUSES],
+  ['ck_recurring_runs__status', RECURRING_RUN_STATUSES],
+  ['ck_audit_logs__target_type', AUDIT_TARGET_TYPES],
 ];
 
 describeDb('enum parity between CHECK constraints and @midas/shared', () => {

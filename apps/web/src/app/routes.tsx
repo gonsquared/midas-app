@@ -4,9 +4,14 @@ import {
   lazyRouteComponent,
   notFound,
   redirect,
-  type AnyRoute,
 } from '@tanstack/react-router';
 import { restoreSession } from '@/features/auth/api';
+import { parseAuditSearch } from '@/features/admin/audit-search';
+import { parseUsersSearch } from '@/features/admin/users-search';
+import { parseBudgetsSearch } from '@/features/budgets/search';
+import { parseDashboardSearch } from '@/features/dashboard/search';
+import { parseRecurringSearch } from '@/features/recurring/search';
+import { parseReportsSearch } from '@/features/reports/search';
 import { parseCategoriesSearch } from '@/features/categories/search';
 import { parseTransactionsSearch } from '@/features/transactions/filters';
 import { parseWalletsSearch } from '@/features/wallets/search';
@@ -19,7 +24,6 @@ import { DEFAULT_RETURN_PATH, safeReturnPath } from '@/lib/redirect';
 import { isUuid } from '@/lib/uuid';
 import { getSessionSnapshot, setSession } from '@/lib/session';
 import { NotFoundPage } from '@/routes/not-found-page';
-import { PlaceholderPage } from '@/routes/placeholder-page';
 import { PublicLayout } from '@/routes/public-pages';
 import { ErrorFallback } from './error-boundary';
 import { RootLayout } from './root-layout';
@@ -159,30 +163,43 @@ const appLayout = createRoute({
   ),
 });
 
-function appPage<TParent extends AnyRoute, TPath extends string>(
-  parent: TParent,
-  path: TPath,
-  title: string,
-  summary: string,
-) {
-  return createRoute({
-    getParentRoute: () => parent,
-    path,
-    staticData: { title },
-    component: () => <PlaceholderPage title={title} summary={summary} />,
-  });
-}
-
-const page = <TPath extends string>(path: TPath, title: string, summary: string) =>
-  appPage(appLayout, path, title, summary);
-
 const adminRoute = createRoute({
   getParentRoute: () => appLayout,
   path: '/admin',
   beforeLoad: requireAdmin,
 });
-const adminPage = <TPath extends string>(path: TPath, title: string, summary: string) =>
-  appPage(adminRoute, path, title, summary);
+const adminOverviewRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: '/',
+  staticData: { title: 'Administration' },
+  component: lazyRouteComponent(
+    () => import('@/features/admin/admin-overview-page'),
+    'AdminOverviewPage',
+  ),
+});
+const adminUsersRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: '/users',
+  staticData: { title: 'Users' },
+  validateSearch: parseUsersSearch,
+  component: lazyRouteComponent(() => import('@/features/admin/users-page'), 'AdminUsersPage'),
+});
+const adminCategoriesRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: '/categories',
+  staticData: { title: 'Default categories' },
+  component: lazyRouteComponent(
+    () => import('@/features/admin/admin-categories-page'),
+    'AdminCategoriesPage',
+  ),
+});
+const adminAuditRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: '/audit',
+  staticData: { title: 'Audit log' },
+  validateSearch: parseAuditSearch,
+  component: lazyRouteComponent(() => import('@/features/admin/audit-page'), 'AdminAuditPage'),
+});
 
 // Wallet dialogs are overlay child routes: the page stays mounted and reads the URL (ui-design 18.1.2).
 const walletsRoute = createRoute({
@@ -212,6 +229,44 @@ const categoriesNewRoute = createRoute({ getParentRoute: () => categoriesRoute, 
 const categoriesEditRoute = createRoute({
   getParentRoute: () => categoriesRoute,
   path: '/$categoryId/edit',
+});
+
+const dashboardRoute = createRoute({
+  getParentRoute: () => appLayout,
+  path: '/dashboard',
+  staticData: { title: 'Dashboard' },
+  validateSearch: parseDashboardSearch,
+  component: lazyRouteComponent(
+    () => import('@/features/dashboard/dashboard-page'),
+    'DashboardPage',
+  ),
+});
+
+const reportsRoute = createRoute({
+  getParentRoute: () => appLayout,
+  path: '/reports',
+  staticData: { title: 'Reports' },
+  validateSearch: parseReportsSearch,
+  component: lazyRouteComponent(() => import('@/features/reports/reports-page'), 'ReportsPage'),
+});
+
+const recurringRoute = createRoute({
+  getParentRoute: () => appLayout,
+  path: '/recurring',
+  staticData: { title: 'Recurring' },
+  validateSearch: parseRecurringSearch,
+  component: lazyRouteComponent(
+    () => import('@/features/recurring/recurring-page'),
+    'RecurringPage',
+  ),
+});
+
+const budgetsRoute = createRoute({
+  getParentRoute: () => appLayout,
+  path: '/budgets',
+  staticData: { title: 'Budgets' },
+  validateSearch: parseBudgetsSearch,
+  component: lazyRouteComponent(() => import('@/features/budgets/budgets-page'), 'BudgetsPage'),
 });
 
 const transactionsRoute = createRoute({
@@ -260,19 +315,15 @@ export const routeTree = rootRoute.addChildren([
   indexRoute,
   publicLayout.addChildren([loginRoute, registerRoute, forgotPasswordRoute, resetPasswordRoute]),
   appLayout.addChildren([
-    page(
-      '/dashboard',
-      'Dashboard',
-      'Your overview of money in, money out and budgets will appear here.',
-    ),
+    dashboardRoute,
     transactionsRoute,
     transactionsNewRedirect,
     transactionsIdRedirect,
     walletsRoute.addChildren([walletsNewRoute, walletsEditRoute]),
     categoriesRoute.addChildren([categoriesNewRoute, categoriesEditRoute]),
-    page('/budgets', 'Budgets', 'Your spending limits and pace will appear here.'),
-    page('/recurring', 'Recurring', 'Your repeating transactions will appear here.'),
-    page('/reports', 'Reports', 'Trends and breakdowns will appear here.'),
+    budgetsRoute,
+    recurringRoute,
+    reportsRoute,
     createRoute({
       getParentRoute: () => appLayout,
       path: '/settings',
@@ -283,10 +334,10 @@ export const routeTree = rootRoute.addChildren([
       ),
     }),
     adminRoute.addChildren([
-      adminPage('/', 'Administration', 'Platform totals will appear here.'),
-      adminPage('/users', 'Users', 'Account status and roles will appear here.'),
-      adminPage('/categories', 'Default categories', 'Default categories will appear here.'),
-      adminPage('/audit', 'Audit log', 'Administrative activity will appear here.'),
+      adminOverviewRoute,
+      adminUsersRoute,
+      adminCategoriesRoute,
+      adminAuditRoute,
     ]),
   ]),
   ...(designSystemRoute ? [designSystemRoute] : []),

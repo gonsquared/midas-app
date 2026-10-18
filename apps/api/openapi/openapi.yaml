@@ -60,7 +60,7 @@ paths:
       operationId: getMetrics
       summary: Prometheus metrics
       description: 'Requires `Authorization: Bearer <METRICS_TOKEN>`. Returns 404 when `METRICS_TOKEN` is unset.'
-      x-implementation-status: planned
+      x-implementation-status: implemented
       security:
         - metricsToken: []
       responses:
@@ -653,7 +653,7 @@ paths:
         Rate limited (10/min). Same filters as the list endpoint except `limit` and `cursor`. Streamed UTF-8 CSV with a BOM and the header row
         `date,type,direction,wallet,currency,amount,category,note,counterpart_wallet,transaction_id,transfer_id,recurring_template_id`.
         `amount` is a signed decimal in major units. Text cells beginning with `=`, `+`, `-`, `@`, tab or carriage return are prefixed with a single quote.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       parameters:
         - { $ref: '#/components/parameters/TxFrom' }
         - { $ref: '#/components/parameters/TxTo' }
@@ -841,7 +841,7 @@ paths:
       tags: [Budgets]
       operationId: listBudgets
       summary: List budgets with status for a period
-      x-implementation-status: planned
+      x-implementation-status: implemented
       parameters:
         - { $ref: '#/components/parameters/BudgetDate' }
       responses:
@@ -865,7 +865,7 @@ paths:
       tags: [Budgets]
       operationId: createBudget
       summary: Create a budget
-      x-implementation-status: planned
+      x-implementation-status: implemented
       requestBody:
         required: true
         content:
@@ -895,7 +895,7 @@ paths:
       tags: [Budgets]
       operationId: getBudget
       summary: Get a budget
-      x-implementation-status: planned
+      x-implementation-status: implemented
       parameters:
         - { $ref: '#/components/parameters/BudgetDate' }
       responses:
@@ -914,7 +914,7 @@ paths:
       operationId: updateBudget
       summary: Update a budget
       description: Scope, category, period and currency cannot be changed; delete the budget and create a new one instead.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       requestBody:
         required: true
         content:
@@ -935,7 +935,7 @@ paths:
       tags: [Budgets]
       operationId: deleteBudget
       summary: Delete a budget
-      x-implementation-status: planned
+      x-implementation-status: implemented
       responses:
         '204':
           description: Deleted.
@@ -951,7 +951,7 @@ paths:
       operationId: getReportSummary
       summary: Dashboard summary
       description: Income and expense totals exclude transfers. The default range is the current calendar month in the user's timezone.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       parameters:
         - name: from
           in: query
@@ -979,7 +979,7 @@ paths:
       operationId: getReportTrend
       summary: Income and expense trend
       description: Income and expense totals exclude transfers.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       parameters:
         - name: from
           in: query
@@ -1014,7 +1014,7 @@ paths:
       operationId: getReportCategoryBreakdown
       summary: Spending or income by category
       description: Income and expense totals exclude transfers.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       parameters:
         - name: from
           in: query
@@ -1053,7 +1053,7 @@ paths:
       tags: [Recurring templates]
       operationId: listRecurringTemplates
       summary: List recurring templates
-      x-implementation-status: planned
+      x-implementation-status: implemented
       parameters:
         - name: status
           in: query
@@ -1078,7 +1078,7 @@ paths:
       tags: [Recurring templates]
       operationId: createRecurringTemplate
       summary: Create a recurring template
-      x-implementation-status: planned
+      x-implementation-status: implemented
       requestBody:
         required: true
         content:
@@ -1107,7 +1107,7 @@ paths:
       operationId: previewRecurringTemplate
       summary: Compute occurrence dates without saving
       description: Must be registered before `/recurring-templates/{templateId}`.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       requestBody:
         required: true
         content:
@@ -1137,7 +1137,7 @@ paths:
       tags: [Recurring templates]
       operationId: getRecurringTemplate
       summary: Get a recurring template
-      x-implementation-status: planned
+      x-implementation-status: implemented
       responses:
         '200':
           description: The template.
@@ -1154,7 +1154,7 @@ paths:
       operationId: updateRecurringTemplate
       summary: Update a recurring template
       description: '`type` cannot be changed. Changes affect future occurrences only. If any schedule field changes, `nextRunOn` is recomputed as the first occurrence on or after today.'
-      x-implementation-status: planned
+      x-implementation-status: implemented
       requestBody:
         required: true
         content:
@@ -1182,7 +1182,7 @@ paths:
       operationId: deleteRecurringTemplate
       summary: Delete a recurring template
       description: Generated transactions are kept, with `recurringTemplateId` set to null.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       responses:
         '204':
           description: Deleted.
@@ -1200,7 +1200,7 @@ paths:
       operationId: pauseRecurringTemplate
       summary: Pause a recurring template
       description: Idempotent.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       responses:
         '200':
           description: The paused template.
@@ -1224,7 +1224,7 @@ paths:
       operationId: resumeRecurringTemplate
       summary: Resume a recurring template
       description: Idempotent. `nextRunOn` becomes the first occurrence on or after today (no backfill of the paused period) and `consecutiveFailures` is reset to 0.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       responses:
         '200':
           description: The active template.
@@ -1250,7 +1250,7 @@ paths:
       tags: [Recurring templates]
       operationId: listRecurringTemplateRuns
       summary: List runs of a recurring template (newest occurrence first)
-      x-implementation-status: planned
+      x-implementation-status: implemented
       parameters:
         - { $ref: '#/components/parameters/Limit' }
         - { $ref: '#/components/parameters/Cursor' }
@@ -1274,7 +1274,7 @@ paths:
       operationId: adminListUsers
       summary: List users (offset pagination)
       description: Admin only. Returns no per-user financial data.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       parameters:
         - name: q
           in: query
@@ -1310,7 +1310,7 @@ paths:
       tags: [Admin users]
       operationId: adminGetUser
       summary: Get a user
-      x-implementation-status: planned
+      x-implementation-status: implemented
       responses:
         '200':
           description: The user.
@@ -1332,7 +1332,7 @@ paths:
       operationId: adminSuspendUser
       summary: Suspend a user
       description: Revokes all of the user's sessions and is audited (`admin.user_suspended`). Idempotent; no new audit entry if already suspended.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       requestBody:
         required: false
         content:
@@ -1362,7 +1362,7 @@ paths:
       operationId: adminReactivateUser
       summary: Reactivate a user
       description: Audited (`admin.user_reactivated`). Idempotent.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       responses:
         '200':
           description: The reactivated user.
@@ -1387,7 +1387,7 @@ paths:
       operationId: adminChangeUserRole
       summary: Change a user's role
       description: Audited (`admin.user_role_changed`, metadata `{ from, to }`). Takes effect on the target's next request.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       requestBody:
         required: true
         content:
@@ -1414,7 +1414,7 @@ paths:
       tags: [Admin categories]
       operationId: adminListCategories
       summary: List system categories
-      x-implementation-status: planned
+      x-implementation-status: implemented
       parameters:
         - name: type
           in: query
@@ -1444,7 +1444,7 @@ paths:
       operationId: adminCreateCategory
       summary: Create a system category
       description: Audited (`admin.category_created`).
-      x-implementation-status: planned
+      x-implementation-status: implemented
       requestBody:
         required: true
         content:
@@ -1473,7 +1473,7 @@ paths:
       operationId: adminUpdateCategory
       summary: Update a system category
       description: Audited (`admin.category_updated`, metadata lists the changed field names).
-      x-implementation-status: planned
+      x-implementation-status: implemented
       requestBody:
         required: true
         content:
@@ -1505,7 +1505,7 @@ paths:
       operationId: adminRetireCategory
       summary: Retire a system category
       description: It stays on existing transactions, budgets and templates and cannot be selected for new ones. Audited. Idempotent.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       responses:
         '200':
           description: The retired category.
@@ -1527,7 +1527,7 @@ paths:
       operationId: adminRestoreCategory
       summary: Restore a retired system category
       description: Audited. Idempotent.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       responses:
         '200':
           description: The restored category.
@@ -1550,7 +1550,7 @@ paths:
       operationId: adminGetMetrics
       summary: Platform metrics
       description: Cached for up to 5 minutes; see `generatedAt`.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       responses:
         '200':
           description: Platform metrics.
@@ -1569,7 +1569,7 @@ paths:
       operationId: adminListAuditLogs
       summary: List audit log entries (newest first, cursor pagination)
       description: There are no endpoints for creating, updating or deleting audit entries.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       parameters:
         - name: actorId
           in: query
@@ -1591,6 +1591,7 @@ paths:
           schema: { $ref: '#/components/schemas/AuditTargetType' }
         - name: targetId
           in: query
+          description: Requires `targetType` (400 otherwise), so the target index is always used.
           schema: { type: string, format: uuid }
         - name: from
           in: query
@@ -1695,7 +1696,7 @@ components:
     Page:
       name: page
       in: query
-      schema: { type: integer, minimum: 1, default: 1 }
+      schema: { type: integer, minimum: 1, maximum: 1000, default: 1 }
     PageSize:
       name: pageSize
       in: query

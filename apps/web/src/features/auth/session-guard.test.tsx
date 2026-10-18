@@ -169,8 +169,8 @@ describe('sign-out across tabs', () => {
     signedInAs('user');
     const channel = stubBroadcastChannel();
     mockApi({});
-    const { router, queryClient } = await renderApp('/dashboard');
-    await screen.findByRole('heading', { name: 'Dashboard' });
+    const { router, queryClient } = await renderApp('/settings');
+    await screen.findByRole('heading', { name: 'Settings' });
     queryClient.setQueryData(['wallets', 'list'], { items: [] });
     act(() => channel.fromOtherTab({ type: 'something-else' }));
     expect(getSessionSnapshot().user).not.toBeNull();

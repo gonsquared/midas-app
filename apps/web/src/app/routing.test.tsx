@@ -87,8 +87,8 @@ describe('sign out', () => {
     signedInAs('user');
     stubRefresh(null);
     const user = userEvent.setup();
-    const { router } = await renderApp('/dashboard');
-    await screen.findByRole('heading', { name: 'Dashboard' });
+    const { router } = await renderApp('/settings');
+    await screen.findByRole('heading', { name: 'Settings' });
 
     await user.click(screen.getByRole('button', { name: /Account menu for Kim Morgan/ }));
     await user.click(await screen.findByRole('menuitem', { name: 'Sign out' }));

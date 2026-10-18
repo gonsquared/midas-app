@@ -139,7 +139,7 @@ export class WalletService {
     }
   }
 
-  /** Idempotent. Recurring templates on the wallet are paused once that table exists (E8). */
+  /** Idempotent. Active recurring templates on the wallet are paused in the same transaction. */
   async archive(userId: string, walletId: string): Promise<Wallet> {
     return this.setArchived(userId, walletId, true);
   }
@@ -171,6 +171,8 @@ export class WalletService {
         const isArchived = locked.archivedAt !== null;
         if (isArchived !== archive) {
           await wallets.setArchivedAt(userId, walletId, archive ? this.deps.clock.now() : null);
+          // Templates stay paused after unarchiving; the user resumes them on purpose.
+          if (archive) await wallets.pauseActiveTemplates(userId, walletId);
         }
         const current = await wallets.findById(userId, walletId);
         if (!current) throw notFound();

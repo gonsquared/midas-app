@@ -206,6 +206,18 @@ describeDb('schema migrations (real PostgreSQL)', () => {
     );
   });
 
+  // Privilege matrix (database design notes 13.1 and 16.4).
+  const PRIVILEGES = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE'];
+  async function privileges(role: string, tables: string[]) {
+    const { rows } = await owner.query<{ t: string; priv: string; ok: boolean }>(
+      `SELECT t, priv, has_table_privilege($1, 'public.' || t, priv) AS ok
+       FROM unnest($2::text[]) AS t, unnest($3::text[]) AS priv`,
+      [role, tables, PRIVILEGES],
+    );
+    expect(rows).toHaveLength(tables.length * PRIVILEGES.length);
+    return rows;
+  }
+
   it('grants midas_app data access but no TRUNCATE (privilege matrix)', async () => {
     const tables = [
       'users',
@@ -215,16 +227,36 @@ describeDb('schema migrations (real PostgreSQL)', () => {
       'categories',
       'transfers',
       'transactions',
+      'budgets',
+      'recurring_templates',
+      'recurring_runs',
     ];
-    const rows = await owner.query<{ t: string; priv: string; ok: boolean }>(
-      `SELECT t, priv, has_table_privilege('midas_app', 'public.' || t, priv) AS ok
-       FROM unnest($1::text[]) AS t,
-            unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE']) AS priv`,
-      [tables],
-    );
-    expect(rows.rows).toHaveLength(tables.length * 5);
-    for (const row of rows.rows) {
+    for (const row of await privileges('midas_app', tables)) {
       expect(row.ok, row.t + ' ' + row.priv).toBe(row.priv !== 'TRUNCATE');
+    }
+  });
+
+  it('gives midas_app only SELECT and INSERT on audit_logs (C-10)', async () => {
+    for (const row of await privileges('midas_app', ['audit_logs'])) {
+      expect(row.ok, row.priv).toBe(row.priv === 'SELECT' || row.priv === 'INSERT');
+    }
+  });
+
+  it('gives midas_maintenance only SELECT and DELETE, on audit_logs and recurring_runs only', async () => {
+    const purgeable = ['audit_logs', 'recurring_runs'];
+    for (const row of await privileges('midas_maintenance', purgeable)) {
+      expect(row.ok, row.t + ' ' + row.priv).toBe(row.priv === 'SELECT' || row.priv === 'DELETE');
+    }
+    const others = [
+      'users',
+      'sessions',
+      'wallets',
+      'transactions',
+      'budgets',
+      'recurring_templates',
+    ];
+    for (const row of await privileges('midas_maintenance', others)) {
+      expect(row.ok, row.t + ' ' + row.priv).toBe(false);
     }
   });
 
@@ -235,31 +267,58 @@ describeDb('schema migrations (real PostgreSQL)', () => {
     const expected = files.slice(auth).reverse();
     const reverted = await runMigrations({ connection, direction: 'down', count: expected.length });
     expect(reverted).toEqual(expected);
-    const probe = `SELECT to_regclass('public.users') AS users, to_regclass('public.sessions') AS sessions,
-                          to_regclass('public.wallets') AS wallets, to_regclass('public.categories') AS categories,
-                          to_regclass('public.transfers') AS transfers, to_regclass('public.transactions') AS transactions`;
-    const gone = await owner.query(probe);
-    expect(Object.values(gone.rows[0]).every((v) => v === null)).toBe(true);
+    const tables = [
+      'users',
+      'sessions',
+      'wallets',
+      'categories',
+      'transfers',
+      'transactions',
+      'budgets',
+      'recurring_templates',
+      'recurring_runs',
+      'audit_logs',
+    ];
+    const probe = `SELECT t, to_regclass('public.' || t)::text AS present FROM unnest($1::text[]) AS t`;
+    const gone = await owner.query<{ t: string; present: string | null }>(probe, [tables]);
+    expect(gone.rows.filter((r) => r.present !== null)).toEqual([]);
     const fns = await owner.query(`SELECT proname FROM pg_proc WHERE proname = ANY($1::text[])`, [
       [
         'apply_wallet_balance',
         'assert_transfer_pair',
         'assert_category_accessible',
         'forbid_category_owner_change',
+        'forbid_audit_mutation',
       ],
     ]);
     expect(fns.rowCount).toBe(0);
 
     await runMigrations({ connection, direction: 'up' });
-    const back = await owner.query(probe);
-    expect(back.rows[0]).toEqual({
-      users: 'users',
-      sessions: 'sessions',
-      wallets: 'wallets',
-      categories: 'categories',
-      transfers: 'transfers',
-      transactions: 'transactions',
-    });
+    const back = await owner.query<{ t: string; present: string | null }>(probe, [tables]);
+    expect(back.rows.map((r) => r.present)).toEqual(tables);
+  });
+
+  it('reverts create-recurring cleanly: the transactions link is removed and re-added', async () => {
+    const connection = { connectionString: dbTestInfo()!.ownerUrl };
+    const files = await listMigrationFiles();
+    const count = files.length - files.findIndex((name) => name.endsWith('_create-recurring'));
+    const column = `SELECT count(*)::int AS n FROM information_schema.columns
+                     WHERE table_name = 'transactions' AND column_name = 'recurring_template_id'`;
+    const objects = `SELECT count(*)::int AS n FROM pg_constraint
+                      WHERE conname IN ('fk_transactions__recurring_template', 'ck_transactions__recurring_type')`;
+    try {
+      await runMigrations({ connection, direction: 'down', count });
+      expect((await owner.query(column)).rows[0].n).toBe(0);
+      expect((await owner.query(objects)).rows[0].n).toBe(0);
+      expect(
+        (await owner.query(`SELECT to_regclass('public.ix_transactions__recurring_template') AS i`))
+          .rows[0].i,
+      ).toBeNull();
+    } finally {
+      await runMigrations({ connection, direction: 'up' });
+    }
+    expect((await owner.query(column)).rows[0].n).toBe(1);
+    expect((await owner.query(objects)).rows[0].n).toBe(2);
   });
 
   it('resets wallet ledger balances when the ledger migration is reverted, so up starts clean', async () => {

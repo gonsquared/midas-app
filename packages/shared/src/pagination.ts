@@ -12,3 +12,29 @@ export const CursorQueryShape = {
 export function cursorPage<T extends z.ZodType>(item: T) {
   return z.object({ items: z.array(item), nextCursor: z.string().nullable() });
 }
+
+export const OFFSET_PAGE_SIZE_DEFAULT = 25;
+export const OFFSET_PAGE_SIZE_MAX = 100;
+/** Deepest page offered (1000 x 100 = 100k rows): deeper offsets are a scan and an abuse vector. Narrow with filters instead. */
+export const OFFSET_PAGE_MAX = 1000;
+
+/** Offset pagination query (api-contract 1.4). */
+export const OffsetQueryShape = {
+  page: z.coerce.number().int().min(1).max(OFFSET_PAGE_MAX).default(1),
+  pageSize: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(OFFSET_PAGE_SIZE_MAX)
+    .default(OFFSET_PAGE_SIZE_DEFAULT),
+};
+
+export function offsetPage<T extends z.ZodType>(item: T) {
+  return z.object({
+    items: z.array(item),
+    page: z.number().int(),
+    pageSize: z.number().int(),
+    totalItems: z.number().int(),
+    totalPages: z.number().int(),
+  });
+}

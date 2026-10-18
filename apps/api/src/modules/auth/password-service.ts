@@ -9,7 +9,8 @@ import { passwordResetMessage, RESET_TOKEN_TTL_MINUTES } from '../../platform/ma
 import { assertStrongPassword } from './password-policy.js';
 import type { PasswordHasher } from './password-hasher.js';
 import type { AuthRepositories, AuthUnitOfWork } from './repository.js';
-import type { SecurityLogger } from './service.js';
+import { noopAuditRecorder, type AuditRecorder } from '../audit/service.js';
+import type { RequestContext, SecurityLogger } from './service.js';
 
 /** At most one outstanding reset token per user (database design 9.2). */
 export const RESET_OUTSTANDING_CONSTRAINT = 'uq_password_reset_tokens__user_outstanding';
@@ -33,6 +34,8 @@ export interface PasswordServiceDeps {
   background: BackgroundTasks;
   appBaseUrl: string;
   logger: SecurityLogger;
+  /** Best-effort audit trail (database design C-07). Defaults to a no-op. */
+  audit?: AuditRecorder;
 }
 
 function resetTokenInvalid(): AppError {
@@ -40,13 +43,17 @@ function resetTokenInvalid(): AppError {
 }
 
 export class PasswordService {
-  constructor(private readonly deps: PasswordServiceDeps) {}
+  private readonly audit: AuditRecorder;
+
+  constructor(private readonly deps: PasswordServiceDeps) {
+    this.audit = deps.audit ?? noopAuditRecorder;
+  }
 
   /**
    * Always succeeds from the caller point of view. The lookup, token creation and email run after
    * the response, so neither the body nor the timing depends on whether the email is registered.
    */
-  requestReset(email: string): void {
+  requestReset(email: string, context?: RequestContext): void {
     this.deps.background.run(async () => {
       const { repositories, unitOfWork, clock, mailer, appBaseUrl, logger } = this.deps;
       const user = await repositories.users.findByEmail(email);
@@ -82,6 +89,13 @@ export class PasswordService {
         { event: 'auth.password_reset_requested', known: true, userId: user.id },
         'reset requested',
       );
+      await this.audit.record({
+        actorUserId: user.id,
+        action: 'auth.password_reset_requested',
+        targetType: 'user',
+        targetId: user.id,
+        ...(context && { context }),
+      });
       // After commit, never inside the transaction (database design 9.2).
       await mailer.send(
         passwordResetMessage({ to: user.email, displayName: user.displayName, appBaseUrl, token }),
@@ -103,7 +117,7 @@ export class PasswordService {
    * in the same transaction (database design C-08). A weak password rolls the consumption back,
    * so the user can retry with the same link.
    */
-  async resetPassword(input: ResetPasswordRequest): Promise<void> {
+  async resetPassword(input: ResetPasswordRequest, context?: RequestContext): Promise<void> {
     const { repositories, unitOfWork, clock, hasher, logger } = this.deps;
     const tokenHash = hashResetToken(input.token);
     if (!(await repositories.resetTokens.isValid(tokenHash, clock.now())))
@@ -122,12 +136,20 @@ export class PasswordService {
       return user.id;
     });
     logger.info({ event: 'auth.password_reset_completed', userId }, 'password reset completed');
+    await this.audit.record({
+      actorUserId: userId,
+      action: 'auth.password_reset_completed',
+      targetType: 'user',
+      targetId: userId,
+      ...(context && { context }),
+    });
   }
 
   /** Changes the password of the signed-in user and revokes every other session. */
   async changePassword(
     principal: { userId: string; sessionId: string },
     input: ChangePasswordRequest,
+    context?: RequestContext,
   ): Promise<void> {
     const { unitOfWork, repositories, hasher, clock, logger } = this.deps;
 
@@ -171,5 +193,12 @@ export class PasswordService {
       );
     });
     logger.info({ event: 'user.password_changed', userId: principal.userId }, 'password changed');
+    await this.audit.record({
+      actorUserId: principal.userId,
+      action: 'user.password_changed',
+      targetType: 'user',
+      targetId: principal.userId,
+      ...(context && { context }),
+    });
   }
 }

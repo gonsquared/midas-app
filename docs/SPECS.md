@@ -2,7 +2,7 @@
 
 **Version:** 1.1
 **Date:** 2026-10-18
-**Status:** Active (Sprint 2 core features implemented; Sprints 3 and 4 not started)
+**Status:** Active (Sprints 2 and 3 implemented; Sprint 4 not started)
 **Owner:** docs-agent
 
 Related documents: [Project brief](./project-brief.md) · [Architecture](./architecture.md) · [API contract](./api-contract.md) · [Database design](./database.md) · [UI and UX design](./ui-design.md) · [Docs index](./README.md)
@@ -73,7 +73,7 @@ Requirement IDs use `REQ-<epic>.<feature>.<seq>`. Epic and feature numbers follo
 
 **Priority mapping.** Sprint 1 and 2 stories are Must Have (core, launch-blocking). Sprint 3 stories are Should Have. Sprint 4 hardening and release stories are Must Have because they gate release. Could Have is unused in v1.
 
-**Implementation status (as of 2026-10-18, end of Sprint 2).** Implemented in code: registration, login, logout, refresh and password reset (REQ-2.2.x, 2.3.x); profile and settings (REQ-2.4.x); wallets (REQ-3.1.x); transfers (REQ-3.2.x); categories (REQ-4.1.x); transaction CRUD, search and the transaction UI (REQ-5.1.x, 5.2.x). Feature 5.3 (CSV export) and Epics 6 to 9 (budgets, dashboard, recurring, admin) are not started. Epic 10 hardening is not started, except that rate limiting, the strict CSP and the ledger triggers already exist as Sprint 2 groundwork (REQ-2.2.9, REQ-2.2.10, REQ-5.1.3). Per-story state is tracked in the project backlog; requirements below are not individually status-tagged.
+**Implementation status (as of 2026-10-19, end of Sprint 3).** Implemented in code: registration, login, logout, refresh and password reset (REQ-2.2.x, 2.3.x); profile and settings (REQ-2.4.x); wallets (REQ-3.1.x); transfers (REQ-3.2.x); categories (REQ-4.1.x); transaction CRUD, search and the transaction UI (REQ-5.1.x, 5.2.x); CSV export (REQ-5.3.x); budgets and overspend warnings (Epic 6); dashboard and reports (Epic 7); recurring transactions (Epic 8); and the admin area with audit log (Epic 9). Known gaps: audit and recurring-run retention purge jobs, the post-transaction budget toast, and a dedicated worker process are not built. Epic 10 hardening is not started, except that rate limiting, the strict CSP and the ledger triggers already exist as Sprint 2 groundwork (REQ-2.2.9, REQ-2.2.10, REQ-5.1.3). Per-story state is tracked in the project backlog; requirements below are not individually status-tagged.
 
 **Deferred.** Serving the built SPA from the API origin (static-SPA plugin) and a CI job running Playwright against the production build under the real CSP are deferred to the Sprint 4 deployment stories (Epic 10, Feature 10.3). Until then the Compose stack does not serve the SPA and Playwright runs use the Vite dev server.
 
@@ -461,4 +461,4 @@ Requirement IDs use `REQ-<epic>.<feature>.<seq>`. Epic and feature numbers follo
 | --- | --- | --- | --- |
 | 1.0 | 2026-10-16 | docs-agent | Initial specification derived from the project brief, architecture, API contract, database design, UI design and dev stories tracker. |
 | 1.1 | 2026-10-18 | docs-agent | Sprint 2 update. Added implementation status and deferral notes to section 4. Added REQ-2.2.8 to 2.2.10, REQ-5.1.3, REQ-5.2.7; clarified REQ-2.2.4, 3.2.3, 5.2.3. Added NFR-S-8 and NFR-D-3; updated NFR-S-2. Recorded Sprint 2 decisions (ADR-008 explicit toAmountMinor, `<sid>.<random>` refresh token, native controls under strict CSP, single-currency amount filter, URL-driven composer). Deferred SPA-from-API and CSP e2e to Sprint 4. Updated constraints, rendering note and glossary. |
-
+| 1.2 | 2026-10-19 | docs-agent | Sprint 3 update. Implementation status now covers CSV export, budgets, dashboard and reports, recurring transactions and admin; known gaps listed. |

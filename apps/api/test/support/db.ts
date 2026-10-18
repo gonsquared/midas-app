@@ -15,6 +15,10 @@ export function dbTestInfo() {
 export const describeDb = dbTestInfo() ? describe : describe.skip;
 
 const TABLES = [
+  'audit_logs',
+  'recurring_runs',
+  'recurring_templates',
+  'budgets',
   'transactions',
   'transfers',
   'categories',

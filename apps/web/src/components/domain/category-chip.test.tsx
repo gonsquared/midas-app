@@ -16,7 +16,9 @@ describe('category icon map', () => {
 });
 
 describe('category color tokens', () => {
-  const css = readFileSync(resolve(process.cwd(), 'src/styles/category-colors.css'), 'utf8');
+  const css = readFileSync(resolve(process.cwd(), 'src/styles/category-colors.css'), 'utf8')
+    // A Windows checkout may have CRLF line endings.
+    .replace(/\r\n/g, '\n');
 
   it('carries one light and one dark rule per palette key that match the shared palette', () => {
     for (const [key, token] of Object.entries(CATEGORY_COLORS)) {

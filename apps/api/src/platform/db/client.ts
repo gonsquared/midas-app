@@ -1,5 +1,6 @@
 import { CamelCasePlugin, Kysely, PostgresDialect, type Transaction } from 'kysely';
 import pg from 'pg';
+import Cursor from 'pg-cursor';
 import type { Config } from '../config.js';
 import type { Database } from './database.js';
 import { isPgError } from './errors.js';
@@ -100,7 +101,8 @@ export function createDatabaseClient(settings: PoolSettings): DatabaseClient {
 /** The one Kysely configuration (PostgresDialect plus CamelCasePlugin) over an existing pool. */
 export function createKysely(pool: pg.Pool): Kysely<Database> {
   return new Kysely<Database>({
-    dialect: new PostgresDialect({ pool }),
+    // pg-cursor backs .stream(): the CSV export reads through a server-side cursor (AP-08).
+    dialect: new PostgresDialect({ pool, cursor: Cursor }),
     plugins: [new CamelCasePlugin()],
   });
 }

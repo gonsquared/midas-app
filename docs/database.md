@@ -2,7 +2,7 @@
 
 **Status:** Accepted (baseline v1). This document resolves ADR-016.
 **Owner:** db-agent
-**Last updated:** 2026-10-17 (E3-F1-S1, E4-F1-S1, E5-F1-S1 implementation notes in §3.1 and §7.8)
+**Last updated:** 2026-10-18 (E6-F1-S1, E8-F1-S1, E9-F1-S1 implemented as migrations 6 to 8; notes in §7.10, §7.11, §11.2 and §13.2)
 **Related:** [Architecture](./architecture.md) (§8 requirements, §14 decision log) · [API contract](./api-contract.md)
 
 This is the authoritative reference for Midas persistence: engine, data-access tooling, the physical schema, indexes, consistency mechanisms, migrations, seeds, backups and local setup. Backend services consume this plan. Schema changes must follow §11 and be reviewed by db-agent.
@@ -1013,6 +1013,8 @@ Notes:
 - `uq_recurring_runs__template_occurrence` is the idempotency key (AP-11). Scanned backwards, it also serves the newest-first run list for one template.
 - Archiving a wallet pauses its active templates in the same transaction (`ix_recurring_templates__wallet_id`).
 - The 200-per-user limit is enforced in the service under a per-user advisory lock.
+- Deleting a template clears `transactions.recurring_template_id` through the foreign key action. That update fires `tg_transactions__updated_at`, so the linked transactions get a new `updatedAt` (their API representation changed). It does not fire the balance, category or pair triggers, because it changes none of their columns (verified 2026-10-18).
+- `midas_maintenance` has `SELECT, DELETE` on `recurring_runs` for the 400-day purge (§10.5), granted by migration 7 when the role exists.
 
 ### 7.11 `audit_logs`
 
@@ -1062,6 +1064,8 @@ Notes:
 - `actorEmail` filters are resolved to an `actor_user_id` through `uq_users__email` first, then use the actor index.
 - Date filters are UTC days: `occurred_at >= :from::date AND occurred_at < (:to::date + 1)`.
 - Keyset order is `occurred_at DESC, id DESC` with the predicate `(occurred_at, id) < (:t, :id)`.
+- `ix_audit_logs__action_occurred_at` is chosen when the action filter is selective (admin actions among many auth events). For a very common action, a backward scan of `ix_audit_logs__occurred_at` with a filter is the cheaper plan, and the planner picks it.
+- `pg_has_role()` treats superusers as members of every role, so a superuser connection passes the delete branch of `forbid_audit_mutation()`. Updates are rejected even for superusers. The application never connects as a superuser.
 - At 5M rows the btree indexes meet AP-14. Monthly range partitioning is the documented next step if the table grows past about 50M rows (it makes retention a cheap `DROP PARTITION`). It is not needed in v1.
 
 ### 7.12 Constraint-to-error mapping
@@ -1338,14 +1342,16 @@ export async function down(pgm: MigrationBuilder): Promise<void> {
 | 4 | `create-categories` | E4-F1-S1 | `categories`, `assert_category_accessible()`, `forbid_category_owner_change()` and `tg_categories__owner_immutable` | Drops the table and both functions |
 | 5 | `create-transfers-and-transactions` | E5-F1-S1 | `apply_wallet_balance()`, `assert_transfer_pair()`, `transfers` (with `ix_transfers__user_id`), `transactions` (without `recurring_template_id`), indexes, triggers, constraint triggers | Drops both tables (with their triggers and indexes), resets `wallets.ledger_balance_minor` to 0 (the wallets survive, their ledger does not), then drops the functions |
 | 6 | `create-budgets` | E6-F1-S1 | `budgets` | Drops `budgets` |
-| 7 | `create-recurring` | E8-F1-S1 | `recurring_templates`, `recurring_runs`; then on `transactions`: add nullable `recurring_template_id`, `fk_transactions__recurring_template`, `ck_transactions__recurring_type`, `ix_transactions__recurring_template` | Drops the column, constraint and index from `transactions`, then both tables |
-| 8 | `create-audit-logs` | E9-F1-S1 | `audit_logs`, indexes, `forbid_audit_mutation()`, immutability trigger, `REVOKE UPDATE, DELETE, TRUNCATE` from `midas_app` | Drops the table and function |
+| 7 | `create-recurring` | E8-F1-S1 | `recurring_templates`, `recurring_runs`; then on `transactions`: add nullable `recurring_template_id`, `fk_transactions__recurring_template`, `ck_transactions__recurring_type`, `ix_transactions__recurring_template`; `GRANT SELECT, DELETE ON recurring_runs` to `midas_maintenance` (only if the role exists) | Drops the column, constraint and index from `transactions`, then both tables |
+| 8 | `create-audit-logs` | E9-F1-S1 | `audit_logs`, indexes, `forbid_audit_mutation()`, immutability trigger, `REVOKE UPDATE, DELETE, TRUNCATE` from `midas_app`, `GRANT SELECT, DELETE` to `midas_maintenance` (each only if the role exists) | Drops the table and function |
 
 Required execution order is the numeric order above. Migration 7 demonstrates the expand pattern on an existing table (adding a nullable column and a foreign key to `transactions`).
 
 Until the first production release, every table is empty outside developer machines, so migrations 1 to 8 may build indexes inside their transaction. After the first release, the online rules in §11.4 are mandatory.
 
 A merged migration is never edited. Corrections are new migrations. (Migrations 4 and 5 were corrected in place on 2026-10-18, before Sprint 2 merged anywhere; see §7.8.)
+
+Migrations 6 to 8 were implemented on 2026-10-18 as `20261018090000000_create-budgets`, `20261018090100000_create-recurring` and `20261018090200000_create-audit-logs`, matching §7.9 to §7.11 without deviation. The role and status fields that E9-F1-S1 covers (`users.role`, `status`, `suspended_at`, `suspended_reason`, `ck_users__suspension`, `ix_users__active_admins`) already exist since migration 2 and are verified by tests, not changed. Schema tests are in `apps/api/test/db/planning-audit-schema.int.test.ts`; enum parity and the privilege matrix (including `midas_maintenance`) are in `enum-parity.int.test.ts` and `migrations.int.test.ts`.
 
 ### 11.3 Compatibility rule
 
@@ -1497,7 +1503,10 @@ GRANT USAGE ON SCHEMA public TO midas_app;
 -- Table privileges are granted by migrations: migration 1 sets
 --   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO midas_app;
 -- and migration 8 revokes UPDATE, DELETE, TRUNCATE on audit_logs from midas_app.
+-- Migrations 7 and 8 grant SELECT, DELETE on recurring_runs and audit_logs to midas_maintenance.
 ```
+
+Create the roles before running the migrations. A migration skips a grant for a role that does not exist yet, so roles created afterwards need those grants applied by hand.
 
 Migrations wrap grants in `DO` blocks that check `pg_roles`, so they also succeed on hosts where the roles do not exist. A schema test (§16.4) asserts the privilege matrix with `has_table_privilege`.
 
