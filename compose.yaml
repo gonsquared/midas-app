@@ -1,28 +1,39 @@
-# Local development stack: PostgreSQL 17, Mailpit and the Midas API (serving the built SPA).
+# Local development stack with hot reload: PostgreSQL 17, Mailpit, the Midas API (tsx watch) and
+# the web app (Vite dev server).
 #
 #   cp .env.example .env        # then replace every change-me-* placeholder
-#   docker compose up --build   # db -> migrate (one-shot) -> api; Mailpit UI on http://localhost:8025
+#   docker compose up --build   # db -> migrate (one-shot) -> api + web
 #   docker compose down         # stop, keep data
 #   docker compose down -v      # stop and DELETE the database volume (reset)
 #
+#   Web app (Vite, hot module reload)  http://localhost:5173
+#   API (tsx watch, restarts on edit)  http://localhost:3000
+#   Mailpit UI                         http://localhost:8025
+#
+# Source is bind-mounted read-only over the image, so edits on the host reload the running
+# services. Dependencies and lockfile changes still need `docker compose up --build`.
 # Only loopback ports are published. Container networking overrides DATABASE_URL and SMTP_HOST,
 # so the values in .env (written for running the API on the host) are not used by these services.
 name: midas
 
-x-midas-app: &midas-app
+x-midas-image: &midas-image
   build:
     context: .
     dockerfile: infra/docker/Dockerfile
     target: runtime
   image: midas-local:dev
+
+x-midas-app: &midas-app
+  <<: *midas-image
   env_file:
     - path: ./.env
       required: false
-  environment:
+  environment: &midas-env
     NODE_ENV: development
     DATABASE_URL: 'postgres://midas_app:${MIDAS_APP_DB_PASSWORD:?set MIDAS_APP_DB_PASSWORD in .env}@db:5432/${POSTGRES_DB:-midas}'
     DATABASE_MIGRATION_URL: 'postgres://${POSTGRES_USER:-midas_owner}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-midas}'
-    APP_BASE_URL: http://localhost:3000
+    # Reset links point at the SPA (Vite), which proxies /api to the API.
+    APP_BASE_URL: http://localhost:5173
     MAIL_TRANSPORT: smtp
     SMTP_HOST: mailpit
     SMTP_PORT: '1025'
@@ -84,8 +95,18 @@ services:
   api:
     <<: *midas-app
     init: true
+    # Watch mode: restarts on source edits. Polling because file events from a host bind mount
+    # (Docker Desktop on Windows and macOS) do not reach inotify inside the container.
+    command: ['node_modules/.bin/tsx', 'watch', 'src/server.ts']
+    environment:
+      <<: *midas-env
+      CHOKIDAR_USEPOLLING: 'true'
     ports:
       - '127.0.0.1:3000:3000'
+    volumes:
+      - ./apps/api/src:/app/apps/api/src:ro
+      - ./apps/api/db:/app/apps/api/db:ro
+      - ./packages/shared/src:/app/packages/shared/src:ro
     depends_on:
       db:
         condition: service_healthy
@@ -93,6 +114,49 @@ services:
         condition: service_completed_successfully
       mailpit:
         condition: service_started
+    restart: unless-stopped
+
+  web:
+    # Same image (it carries the workspace dev dependencies) but no .env file or database
+    # credentials: the dev server needs none of the API's secrets.
+    <<: *midas-image
+    init: true
+    working_dir: /app/apps/web
+    # Vite dev server. Binds 0.0.0.0 inside the container (published on loopback only) and proxies
+    # /api and /health to the api service, so the browser stays same-origin.
+    command: ['node_modules/.bin/vite', '--host', '0.0.0.0']
+    environment:
+      NODE_ENV: development
+      VITE_DEV_HOST: 0.0.0.0
+      VITE_DEV_API_URL: http://api:3000
+      CHOKIDAR_USEPOLLING: 'true'
+    ports:
+      - '127.0.0.1:5173:5173'
+    volumes:
+      - ./apps/web/src:/app/apps/web/src:ro
+      - ./apps/web/public:/app/apps/web/public:ro
+      - ./apps/web/index.html:/app/apps/web/index.html:ro
+      - ./packages/shared/src:/app/packages/shared/src:ro
+    # Vite writes its config bundle and dependency cache under node_modules, which the image owns
+    # as root. Writable scratch space for the node user (uid 1000); lost on restart, rebuilt fast.
+    tmpfs:
+      - /app/apps/web/node_modules/.vite-temp:uid=1000,gid=1000
+      - /app/apps/web/node_modules/.vite:uid=1000,gid=1000
+    depends_on:
+      api:
+        condition: service_started
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:5173/').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
     restart: unless-stopped
 
 volumes:
