@@ -3,7 +3,7 @@
 A personal finance tracker for recording income, expenses and transfers across multiple wallets, planning spending with budgets, automating regular items, and understanding your money through a dashboard and reports.
 
 > **Status: Sprint 2 (Core Features) implemented; Sprint 3 and 4 not started.**
-> Implemented: pnpm monorepo, CI, Docker Compose stack, design system, database migrations, and the Sprint 2 features (registration, login and sessions, password reset, profile and settings, wallets, categories, transactions, transfers) in both the API and the web app. Export, budgets, dashboard, recurring transactions and admin are planned for Sprint 3. See [docs/dev-stories-tracker.md](./docs/dev-stories-tracker.md) for per-story status.
+> Implemented: pnpm monorepo, CI, Docker Compose stack, design system, database migrations, and the Sprint 2 features (registration, login and sessions, password reset, profile and settings, wallets, categories, transactions, transfers) in both the API and the web app. Export, budgets, dashboard, recurring transactions and admin are planned for Sprint 3. Architecture decisions are in [docs/adr/](./docs/adr/README.md); the full documentation map is [docs/README.md](./docs/README.md).
 
 ## Features (planned for v1)
 
@@ -115,18 +115,18 @@ pnpm --filter @midas/api db:codegen       # regenerate Kysely types from the dat
 pnpm --filter @midas/api db:migrate:create <name>   # scaffold a new migration
 ```
 
-`migrate`, `migrate:down`, `migrate:status`, `migrate:verify` and `seed:system` connect through `DATABASE_MIGRATION_URL` (owner role). Schema design, conventions, role setup and the release procedure are in [docs/database.md](./docs/database.md) and [apps/api/db/README.md](./apps/api/db/README.md).
+`migrate`, `migrate:down`, `migrate:status`, `migrate:verify` and `seed:system` connect through `DATABASE_MIGRATION_URL` (owner role). Schema design, conventions, role setup and the release procedure are in [apps/api/db/README.md](./apps/api/db/README.md).
 
 ### Backup and restore (local)
 
-From docs/database.md section 14.3:
+Backup and restore (PostgreSQL logical dumps):
 
 ```bash
 docker compose exec db pg_dump -U midas_owner -Fc midas > midas.dump
 docker compose exec -T db pg_restore -U midas_owner -d midas --clean --if-exists < midas.dump
 ```
 
-Production targets (provider PITR, daily encrypted logical dumps, restore into a new instance, never over the live one) are in docs/database.md section 14. The `db:check` integrity command is planned and not implemented. TODO: `docs/operations/runbook.md` does not exist yet.
+Production targets: provider point-in-time recovery, daily encrypted logical dumps, and restores always into a new instance, never over the live one. The `db:check` integrity command is planned and not implemented. Runbooks live in [docs/operations/](./docs/operations/README.md); none are written yet, only the [template](./docs/operations/runbook-template.md).
 
 ## Checks and tests
 
@@ -201,7 +201,7 @@ The web dev server also reads `VITE_DEV_HOST` (see [CONTRIBUTING.md](./CONTRIBUT
 
 ## API
 
-Base path `/api/v1`. Request and response shapes, the error format, pagination and the endpoint index are in [docs/api-contract.md](./docs/api-contract.md); that document also describes Sprint 3 endpoints that are not implemented yet. TODO: no OpenAPI document is published.
+Base path `/api/v1`. Request and response shapes, the error format, pagination and the endpoint index are in the OpenAPI 3.1 draft, [apps/api/openapi/openapi.yaml](./apps/api/openapi/openapi.yaml), which also lists Sprint 3 endpoints that are not implemented yet; each operation is tagged `x-implementation-status` (implemented or planned), and a test keeps it in sync with the registered routes.
 
 Implemented (Sprint 2):
 
@@ -224,13 +224,13 @@ Authenticated routes expect `Authorization: Bearer <access token>`; the refresh 
 - **Rotation and reuse detection:** each refresh rotates the token. A superseded token seen inside the grace window rotates again; outside it the token counts as replayed and the whole session is revoked (`reuse_detected`). A replayed token older than the immediately previous one still revokes the session it names. Malformed tokens are rejected without a database lookup. Sessions also end at `SESSION_ABSOLUTE_TTL_DAYS`.
 - **Rate limits:** fixed windows per endpoint (login per IP+email and per IP per minute, login per account per hour, forgot-password, reset, refresh, password change, per-user read/write, global per-IP). Only the maximums are tunable through `RATE_LIMIT_*`. Counters are in memory, one LRU store per limiter capped by `RATE_LIMIT_STORE_MAX_KEYS`, so they reset on restart and are not shared across instances. Set `TRUST_PROXY` correctly behind a reverse proxy, otherwise all clients share one IP.
 - **Per-account login limiter trade-off:** `RATE_LIMIT_LOGIN_ACCOUNT_MAX` caps attempts against one account from any IP, which blunts distributed credential stuffing, but an attacker who knows an email can send failing attempts to lock that account out of logging in until the hour window rolls over.
-- **Reset throttling trade-off:** forgot-password is throttled per email hash and per IP, so a third party can use up a victim's per-email allowance and delay the victim's own reset requests for the window. TODO: confirm exact response behaviour in docs/api-contract.md section 4.
+- **Reset throttling trade-off:** forgot-password is throttled per email hash and per IP, so a third party can use up a victim's per-email allowance and delay the victim's own reset requests for the window. The exact response behaviour is defined by the `POST /api/v1/auth/password/forgot` operation in the OpenAPI draft.
 - **Production checks (fail fast at boot):** `APP_BASE_URL` set and `https`; `MAIL_TRANSPORT=smtp`; `DATABASE_SSL=off` rejected; placeholder JWT secret rejected; SMTP must use STARTTLS (or `SMTP_SECURE=true`) with certificate verification.
 - Vulnerability reporting and secret handling: [SECURITY.md](./SECURITY.md).
 
 ## Deployment notes
 
-- Release procedure: run `migrate` and `seed:system` before starting the new image (docs/database.md section 11.7).
+- Release procedure: run `migrate` and `seed:system` before starting the new image.
 - TODO (Sprint 4): serve the built SPA from the API, and add a CI job that runs Playwright against the production build under the real CSP. Neither exists today; current Playwright runs use the Vite dev server.
 
 ## Roadmap
