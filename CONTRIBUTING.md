@@ -80,14 +80,16 @@ Use the templates in `.github/ISSUE_TEMPLATE/` for bug reports and feature reque
 
 ## Docker (local stack)
 
-The Compose stack runs PostgreSQL 17, Mailpit (local SMTP and mail UI) and the API. The API image also contains the built web app, which the API will serve once the static-SPA plugin lands.
+The Compose stack runs PostgreSQL 17, Mailpit (local SMTP and mail UI), the API under `tsx watch` and the web app under the Vite dev server. Source folders are bind-mounted read-only, so edits on the host reload the running services (API restart, web hot module replacement).
 
 ```bash
 cp .env.example .env          # replace every change-me-* placeholder; never commit .env
-docker compose up --build     # db, one-shot migrate, api on http://localhost:3000
+docker compose up --build     # db, one-shot migrate, api on :3000, web on http://localhost:5173
 ```
 
 - Mailpit UI: http://localhost:8025 (SMTP on 1025). Reset emails appear there.
+- Open the app at http://localhost:5173; it proxies `/api` to the API. If another Vite dev server is already running on the host it can shadow the container on IPv6 `localhost`; use http://127.0.0.1:5173 or stop it.
+- Dependency, lockfile, Vite config and Dockerfile changes need `docker compose up --build`.
 - Stop and keep data: `docker compose down`.
 - **Reset** (delete the database volume and start empty): `docker compose down -v`, then `docker compose up --build` again. The init script in `infra/db/init` runs only on a new volume.
 - Ports are published on 127.0.0.1 only.

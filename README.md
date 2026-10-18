@@ -73,22 +73,24 @@ Generate a JWT secret with, for example, `openssl rand -base64 48`.
 ### Run with Docker Compose
 
 ```bash
-docker compose up --build       # PostgreSQL 17, Mailpit, one-shot migrate, API
+docker compose up --build       # PostgreSQL 17, Mailpit, one-shot migrate, API (watch), web (Vite)
 ```
 
 - The `migrate` service is one-shot: it runs `migrate` then `seed:system` through the owner role (`DATABASE_MIGRATION_URL`) and exits. `api` starts only after it succeeds.
+- **Hot reload.** `apps/api/src`, `apps/api/db`, `apps/web/src` and `packages/shared/src` are bind-mounted read-only into the containers. The API runs under `tsx watch` and restarts on edits; the web app runs the Vite dev server with hot module replacement. File watching uses polling so edits made on a Windows or macOS host are seen. Changes to dependencies, lockfile, Vite config or the Dockerfile need `docker compose up --build`.
+- Open the app at http://localhost:5173. Vite proxies `/api` and `/health` to the API, so the browser stays same-origin (no CORS).
 - Mailpit receives development mail (password reset emails); read it at http://localhost:8025.
-- Container networking overrides `DATABASE_URL`, `DATABASE_MIGRATION_URL`, `APP_BASE_URL` (`http://localhost:3000`) and the SMTP settings, so the values in `.env` (written for running on the host) are not used by these services. `.env` must still define `POSTGRES_PASSWORD` and `MIDAS_APP_DB_PASSWORD`.
-- **The Compose stack does not serve the SPA yet.** The API has no static-SPA plugin, so `http://localhost:3000` serves only the API. Run the web dev server on the host (below) to use the UI. The header comment in `compose.yaml` mentions serving the built SPA; that is not implemented.
-- TODO: `docker compose up` was not verified end to end by this documentation pass; confirm before relying on it.
+- Container networking overrides `DATABASE_URL`, `DATABASE_MIGRATION_URL`, `APP_BASE_URL` (`http://localhost:5173`) and the SMTP settings, so the values in `.env` (written for running on the host) are not used by these services. `.env` must still define `POSTGRES_PASSWORD` and `MIDAS_APP_DB_PASSWORD`. The web container does not receive `.env`.
+- If the web app does not load at `localhost:5173`, check for a Vite dev server already running on the host: it can answer on IPv6 `localhost` ahead of the container. Stop it or open http://127.0.0.1:5173.
 
 | Service                   | URL                   |
 | ------------------------- | --------------------- |
+| Web app (Vite)            | http://localhost:5173 |
 | API                       | http://localhost:3000 |
 | Mailpit UI (SMTP on 1025) | http://localhost:8025 |
 | PostgreSQL                | localhost:5432        |
 
-Ports are published on 127.0.0.1 only. The web dev server (below) is not part of the Compose stack. Reset local data with `docker compose down -v`.
+Ports are published on 127.0.0.1 only. Reset local data with `docker compose down -v`.
 
 ### Run the apps in development
 
@@ -97,7 +99,7 @@ pnpm --filter @midas/api dev    # API with watch mode, loads ../../.env (port 30
 pnpm --filter @midas/web dev    # Vite dev server (port 5173), proxies /api to the API
 ```
 
-First run on the host: `docker compose up -d db mailpit`, then `migrate` and `seed:system` (below), then the two dev servers. Set `CORS_ORIGINS` only if the browser calls the API from an origin other than the Vite proxy.
+To run the two dev servers on the host instead of in containers, start only the backing services: `docker compose up -d db mailpit`, then `migrate` and `seed:system` (below), then the two dev servers. Set `CORS_ORIGINS` only if the browser calls the API from an origin other than the Vite proxy.
 
 ### Database migrations
 
