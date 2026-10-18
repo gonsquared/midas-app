@@ -54,3 +54,10 @@ docker-compose.override.yml
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Internal planning and working notes (kept local, not published)
+docs/session-log.md
+docs/dev-stories-tracker.md
+docs/PLAN.md
+docs/planning-index.md
+docs/.story-file-map.json
