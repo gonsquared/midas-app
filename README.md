@@ -31,7 +31,7 @@ Out of scope for v1: bank syncing, shared wallets, receipt OCR, native mobile ap
 | Testing | Vitest, Testcontainers |
 | Delivery | Docker, Docker Compose, GitHub Actions |
 
-The web app also uses TanStack Router and Query; browser tests use Playwright (`e2e/`) and component tests use vitest-axe. TODO: Recharts is not a dependency yet (planned for the Sprint 3 dashboard).
+The web app also uses TanStack Router and Query; browser tests use Playwright (`e2e/`) and component tests use vitest-axe. Recharts is planned for the Sprint 3 dashboard and is not a dependency yet.
 
 ## Architecture summary
 
@@ -143,7 +143,7 @@ pnpm test:e2e                   # Playwright against the Vite dev server with a 
 - Database-backed API tests use Testcontainers, which **needs Docker**, or an existing PostgreSQL 17 server when `TEST_DATABASE_URL` is set (admin URL; a throwaway database is created and dropped). They are skipped when neither is available, so a green run without Docker does not exercise them.
 - Do not substitute PGlite: it is PostgreSQL 18 and fails some DB tests (different SQLSTATE for `ON DELETE RESTRICT`, lost protocol sync after errors).
 - Watch mode: `pnpm --filter @midas/api test:watch`.
-- `pnpm test:e2e` specs intercept `/api/v1` with an in-memory fake. Set `E2E_BASE_URL` to target an already running app instead of starting Vite. TODO: document Playwright browser installation (not confirmed from project files).
+- `pnpm test:e2e` specs intercept `/api/v1` with an in-memory fake. Set `E2E_BASE_URL` to target an already running app instead of starting Vite. Install the browser once with `pnpm --filter @midas/e2e exec playwright install chromium` (add `--with-deps` on a fresh Linux machine; CI does).
 - **Opt-in real-API e2e** (`e2e/tests/real-api.spec.ts`) needs a running API on PostgreSQL 17 with `migrate` and `seed:system` applied: `E2E_REAL_API=1 E2E_BASE_URL=http://localhost:5173 pnpm test:e2e -- real-api`. The password-reset spec also needs `E2E_MAIL_LOG` set to the API log file, with the API started using `MAIL_TRANSPORT=console` and `LOG_LEVEL=info`. Without `E2E_REAL_API=1` these specs are skipped.
 
 ## Environment variables
@@ -237,14 +237,15 @@ Authenticated routes expect `Authorization: Bearer <access token>`; the refresh 
 
 | Sprint | Name | Focus |
 | --- | --- | --- |
-| 1 | Foundation | Monorepo, CI, Docker, API and web skeletons, design system, migrations, registration (some stories still open, see tracker) |
-| 2 | Core Features | Login and sessions, password reset, settings, wallets, categories, transactions, transfers |
+| 1 | Foundation | Monorepo, CI, Docker, API and web skeletons, design system, migrations, registration (complete) |
+| 2 | Core Features (implemented) | Login and sessions, password reset, settings, wallets, categories, transactions, transfers |
 | 3 | Secondary Features | CSV export, budgets, dashboard and reports, recurring transactions, admin |
 | 4 | Quality and Release | Security hardening, accessibility, performance, deployment, documentation, v1.0 release |
 
 ## Contributing
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, checks and conventions, and [SECURITY.md](./SECURITY.md) for reporting vulnerabilities.
+
 ## License
 
 [MIT](./LICENSE) © 2026 Daryll
