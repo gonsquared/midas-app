@@ -126,7 +126,7 @@ docker compose exec db pg_dump -U midas_owner -Fc midas > midas.dump
 docker compose exec -T db pg_restore -U midas_owner -d midas --clean --if-exists < midas.dump
 ```
 
-Production targets (provider PITR, daily encrypted logical dumps, restore into a new instance, never over the live one) are in docs/database.md section 14. The `db:check` integrity command is planned and not implemented. TODO: `docs/operations/runbook.md` does not exist yet.
+Production targets (provider PITR, daily encrypted logical dumps, restore into a new instance, never over the live one) are in docs/database.md section 14. The `db:check` integrity command is planned and not implemented. Runbooks live in [docs/operations/](./docs/operations/README.md); none are written yet, only the [template](./docs/operations/runbook-template.md).
 
 ## Checks and tests
 
@@ -201,7 +201,7 @@ The web dev server also reads `VITE_DEV_HOST` (see [CONTRIBUTING.md](./CONTRIBUT
 
 ## API
 
-Base path `/api/v1`. Request and response shapes, the error format, pagination and the endpoint index are in [docs/api-contract.md](./docs/api-contract.md); that document also describes Sprint 3 endpoints that are not implemented yet. TODO: no OpenAPI document is published.
+Base path `/api/v1`. Request and response shapes, the error format, pagination and the endpoint index are in [docs/api-contract.md](./docs/api-contract.md); that document also describes Sprint 3 endpoints that are not implemented yet. The OpenAPI 3.1 draft is [apps/api/openapi/openapi.yaml](./apps/api/openapi/openapi.yaml); each operation is tagged `x-implementation-status` (implemented or planned), and a test keeps it in sync with the registered routes.
 
 Implemented (Sprint 2):
 
