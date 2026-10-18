@@ -1,6 +1,6 @@
 # Database (apps/api/db)
 
-Authoritative design: database design notes. This folder holds the migration and seed assets.
+Authoritative design: [docs/database.md](../../../docs/database.md) (section numbers below refer to it). This folder holds the migration and seed assets.
 
 - `migrations/` node-pg-migrate files named `<UTC timestamp, 17 digits>_<verb>-<object>.ts`, each exporting
   `up()` and `down()`, written as reviewed SQL through `pgm.sql()`. A merged migration is never edited.
@@ -8,7 +8,7 @@ Authoritative design: database design notes. This folder holds the migration and
 - `seeds/` seed data modules, separate from migrations (section 12).
 - `roles/roles.template.sql` operator template for the `midas_app` and `midas_maintenance` roles.
 
-## Conventions (summary of database design notes section 4)
+## Conventions (summary of docs/database.md section 4)
 
 - Tables `snake_case` plural; columns `snake_case` (camelCase in TypeScript via `CamelCasePlugin`).
 - Constraint names: `pk_`, `fk_<table>__<target>`, `uq_`, `ck_<table>__<rule>`, `ix_`, `tg_`, `ct_`.
@@ -35,13 +35,13 @@ pnpm --filter @midas/api seed:system             # idempotent system categories 
 - Migrations and `seed:system` connect through `DATABASE_MIGRATION_URL` (owner role); the app uses `DATABASE_URL` (`midas_app`).
 - `docker compose up` starts PostgreSQL 17, then the one-shot `migrate` service (runs `migrate` and `seed:system`), then the API.
   `docker compose down -v` deletes the database volume.
-- Release procedure: run `migrate` and `seed:system` before starting the new image (database design notes 11.7).
+- Release procedure: run `migrate` and `seed:system` before starting the new image (docs/database.md 11.7).
 - Local backup: `docker compose exec db pg_dump -U midas_owner -Fc midas > midas.dump`; restore with
   `docker compose exec -T db pg_restore -U midas_owner -d midas --clean --if-exists < midas.dump`.
   Production backup and restore (PITR, encrypted dumps, restore into a new instance) is in `docs/database.md` section 14.
 - `db:check` is planned and not implemented. TODO: `docs/operations/runbook.md` does not exist yet.
 
-## Migrations so far (database design notes 11.2)
+## Migrations so far (docs/database.md 11.2)
 
 | #   | File                                                   | Story    |
 | --- | ------------------------------------------------------ | -------- |

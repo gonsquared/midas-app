@@ -4,7 +4,7 @@
 - **Date:** 2026-10-16
 - **Source:** mirrored from `docs/architecture.md` section 14 (ADR-006)
 
-- **Decision:** versioned REST (`/api/v1`); OpenAPI 3.1 generated from shared Zod schemas; RFC 9457 errors with stable codes; keyset cursors for high-volume lists and page numbers for the admin user table; 404 for foreign resources; strict schemas that reject unknown fields.
+- **Decision:** versioned REST (`/api/v1`); OpenAPI 3.1 intended to be generated from shared Zod schemas (until then a hand-maintained draft, see the amendment); RFC 9457 errors with stable codes; keyset cursors for high-volume lists and page numbers for the admin user table; 404 for foreign resources; strict schemas that reject unknown fields.
 - **Alternatives rejected:** GraphQL (adds complexity for a fixed set of screens and makes rate limiting and authz harder to reason about); tRPC (couples clients to TypeScript, which is weaker for a public API reference); a hand-written OpenAPI spec (drift risk).
 - **Consequences:** a single source of truth for types. `api-contract.md` stays the human authority, and contract tests catch drift.
 
