@@ -273,7 +273,7 @@ pnpm --filter @midas/api cli jobs:run recurring     # one generation pass, then 
 | --- | --- | --- |
 | 1 | Foundation | Monorepo, CI, Docker, API and web skeletons, design system, migrations, registration (complete) |
 | 2 | Core Features (implemented) | Login and sessions, password reset, settings, wallets, categories, transactions, transfers |
-| 3 | Secondary Features | CSV export, budgets, dashboard and reports, recurring transactions, admin |
+| 3 | Secondary Features (implemented) | CSV export, budgets, dashboard and reports, recurring transactions, admin |
 | 4 | Quality and Release | Security hardening, accessibility, performance, deployment, documentation, v1.0 release |
 
 ## Contributing
