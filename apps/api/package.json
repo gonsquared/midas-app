@@ -12,12 +12,14 @@
     "migrate:status": "pnpm run cli migrate:status",
     "migrate:verify": "pnpm run cli migrate:verify",
     "db:migrate:create": "pnpm run cli migrate:create",
+    "seed:system": "pnpm run cli seed:system",
     "db:codegen": "node --env-file-if-exists=../../.env node_modules/kysely-codegen/dist/cli/bin.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@fastify/cors": "^11.3.1",
     "@fastify/helmet": "^13.2.0",
     "@fastify/rate-limit": "^11.2.1",
     "@midas/shared": "workspace:*",
@@ -26,6 +28,7 @@
     "jose": "^6.2.12",
     "kysely": "^0.29.6",
     "node-pg-migrate": "^9.0.0",
+    "nodemailer": "^10.1.2",
     "pg": "^8.23.1",
     "tsx": "^4.23.15",
     "uuid": "^14.0.3",
@@ -34,6 +37,7 @@
   "devDependencies": {
     "@testcontainers/postgresql": "^12.2.1",
     "@types/node": "^24.19.2",
+    "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
     "kysely-codegen": "^0.20.0",
     "testcontainers": "^12.2.1",

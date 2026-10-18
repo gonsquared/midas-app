@@ -4,6 +4,7 @@ import { defaultSessionStore, type SessionStore } from './session';
 
 export const API_BASE_URL = '/api/v1';
 const CSRF_HEADER = 'X-CSRF-Protection';
+export const REFRESH_LOCK_NAME = 'midas-session-refresh';
 export const NETWORK_ERROR_CODE = 'NETWORK_ERROR';
 
 /** Anything with a zod-style `parse`, so responses from the server are validated, not trusted. */
@@ -18,6 +19,8 @@ export class ApiError extends Error {
   readonly fieldErrors: readonly FieldError[];
   /** Server-provided human text for 4xx problems. Rendered as text only. */
   readonly detail: string | undefined;
+  /** Seconds from the Retry-After header (429 responses). */
+  readonly retryAfterSeconds: number | undefined;
 
   constructor(init: {
     status: number;
@@ -26,6 +29,7 @@ export class ApiError extends Error {
     detail?: string | undefined;
     requestId?: string | undefined;
     fieldErrors?: readonly FieldError[] | undefined;
+    retryAfterSeconds?: number | undefined;
   }) {
     super(init.title);
     this.name = 'ApiError';
@@ -34,6 +38,7 @@ export class ApiError extends Error {
     this.detail = init.detail;
     this.requestId = init.requestId;
     this.fieldErrors = init.fieldErrors ?? [];
+    this.retryAfterSeconds = init.retryAfterSeconds;
   }
 }
 
@@ -53,7 +58,8 @@ export function getErrorMessage(error: unknown): string {
 
 export interface RequestOptions<T> {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
-  query?: Record<string, string | number | boolean | undefined>;
+  /** Arrays become repeated keys (?walletId=a&walletId=b), as the API expects. */
+  query?: Record<string, string | number | boolean | readonly string[] | undefined>;
   body?: unknown;
   signal?: AbortSignal;
   /** Attach the bearer token and refresh once on 401. Defaults to true. */
@@ -79,7 +85,11 @@ export interface ApiClient {
 
 const BACKSLASH = String.fromCharCode(92);
 
-function buildUrl(baseUrl: string, path: string, query: RequestOptions<unknown>['query']): string {
+export function buildUrl(
+  baseUrl: string,
+  path: string,
+  query: RequestOptions<unknown>['query'],
+): string {
   // Only app-relative API paths, so a caller-supplied value can never send traffic elsewhere.
   if (
     !path.startsWith('/') ||
@@ -89,12 +99,33 @@ function buildUrl(baseUrl: string, path: string, query: RequestOptions<unknown>[
   ) {
     throw new Error('API paths must be relative and start with a single slash');
   }
+  // No query/fragment smuggling and no dot segments (an unencoded id like "../wallets").
+  if (
+    path.includes('?') ||
+    path.includes('#') ||
+    path.split('/').some((segment) => segment === '.' || segment === '..')
+  ) {
+    throw new Error('API paths must not contain ?, # or dot segments');
+  }
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query ?? {})) {
-    if (value !== undefined) params.set(key, String(value));
+    if (value === undefined) continue;
+    if (typeof value === 'object') for (const item of value) params.append(key, item);
+    else params.set(key, String(value));
   }
   const search = params.toString();
   return `${baseUrl}${path}${search ? `?${search}` : ''}`;
+}
+
+/**
+ * Runs the refresh under a Web Lock so tabs take turns: the server rotates the refresh token, so
+ * two tabs refreshing at once would race (architecture 9). Falls back to a plain call where the
+ * Locks API is missing (single-flight within the tab still applies).
+ */
+function withRefreshLock<T>(task: () => Promise<T>): Promise<T> {
+  const locks = typeof navigator === 'undefined' ? undefined : navigator.locks;
+  if (!locks || typeof locks.request !== 'function') return task();
+  return locks.request(REFRESH_LOCK_NAME, task);
 }
 
 async function readJson(response: Response): Promise<unknown> {
@@ -108,9 +139,16 @@ async function readJson(response: Response): Promise<unknown> {
   }
 }
 
+function parseRetryAfter(response: Response): number | undefined {
+  const raw = response.headers.get('Retry-After');
+  if (!raw || !/^[0-9]{1,6}$/.test(raw)) return undefined;
+  return Number(raw);
+}
+
 /** Maps an RFC 9457 Problem Details response (or anything else) to an ApiError. */
 export async function toApiError(response: Response): Promise<ApiError> {
   const body = await readJson(response);
+  const retryAfterSeconds = parseRetryAfter(response);
   const problem = parseProblem(body);
   if (problem) {
     return new ApiError({
@@ -120,6 +158,7 @@ export async function toApiError(response: Response): Promise<ApiError> {
       detail: problem.detail,
       requestId: problem.requestId,
       fieldErrors: problem.errors,
+      retryAfterSeconds,
     });
   }
   return new ApiError({
@@ -127,6 +166,7 @@ export async function toApiError(response: Response): Promise<ApiError> {
     code: response.status >= 500 ? 'INTERNAL_ERROR' : 'UNKNOWN_ERROR',
     title: response.statusText || 'Request failed',
     requestId: response.headers.get('X-Request-Id') ?? undefined,
+    retryAfterSeconds,
   });
 }
 
@@ -164,7 +204,7 @@ export function createApiClient(deps: ApiClientDeps = {}): ApiClient {
 
   /** Single-flight: concurrent 401s share one refresh call (the server rotates the token). */
   function refresh(): Promise<AuthSession | null> {
-    refreshing ??= (async () => {
+    refreshing ??= withRefreshLock(async () => {
       refreshRejected = false;
       try {
         const response = await send('/auth/refresh', { method: 'POST', auth: false, csrf: true });
@@ -192,7 +232,7 @@ export function createApiClient(deps: ApiClientDeps = {}): ApiClient {
       } finally {
         refreshing = null;
       }
-    })();
+    });
     return refreshing;
   }
 

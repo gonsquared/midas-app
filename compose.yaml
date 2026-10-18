@@ -70,8 +70,12 @@ services:
 
   migrate:
     <<: *midas-app
-    # One-shot: applies pending migrations through the owner role, then exits 0.
-    command: ['node', '--import', 'tsx', 'src/cli.ts', 'migrate']
+    # One-shot: applies pending migrations, then the idempotent system category seed, through the
+    # owner role, then exits 0 (database design notes 11.7 and 12.1).
+    command:
+      - sh
+      - -c
+      - node --import tsx src/cli.ts migrate && node --import tsx src/cli.ts seed:system
     depends_on:
       db:
         condition: service_healthy

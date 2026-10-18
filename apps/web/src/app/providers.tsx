@@ -1,5 +1,6 @@
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
+import { AnnouncerProvider } from '@/components/ui/announcer';
 import { ToastProvider } from '@/components/ui/toast';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { ThemeProvider } from './theme-provider';
@@ -15,7 +16,9 @@ export function AppProviders({
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
-          <ToastProvider>{children}</ToastProvider>
+          <ToastProvider>
+            <AnnouncerProvider>{children}</AnnouncerProvider>
+          </ToastProvider>
         </TooltipProvider>
       </QueryClientProvider>
     </ThemeProvider>

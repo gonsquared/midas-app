@@ -1,6 +1,11 @@
 import pg from 'pg';
 import { describe, inject } from 'vitest';
-import { createDatabaseClient, type DatabaseClient } from '../../src/platform/db/client.js';
+import { seedSystemCategories } from '../../db/seeds/system-categories.js';
+import {
+  createDatabaseClient,
+  createKysely,
+  type DatabaseClient,
+} from '../../src/platform/db/client.js';
 
 export function dbTestInfo() {
   return inject('dbTest');
@@ -9,7 +14,15 @@ export function dbTestInfo() {
 /** `describe` that is skipped (see the global setup warning) when no database is available. */
 export const describeDb = dbTestInfo() ? describe : describe.skip;
 
-const TABLES = ['password_reset_tokens', 'sessions', 'users'];
+const TABLES = [
+  'transactions',
+  'transfers',
+  'categories',
+  'wallets',
+  'password_reset_tokens',
+  'sessions',
+  'users',
+];
 
 export function ownerPool(): pg.Pool {
   const info = dbTestInfo();
@@ -29,7 +42,16 @@ export function appClient(): DatabaseClient {
   });
 }
 
-/** One TRUNCATE over every table so foreign keys are satisfied without CASCADE. */
+/**
+ * One TRUNCATE over every table so foreign keys are satisfied without CASCADE, then the system
+ * category seed again, so every test starts from a migrated and seeded database (16.2).
+ */
 export async function truncateAll(owner: pg.Pool): Promise<void> {
   await owner.query(`TRUNCATE ${TABLES.join(', ')}`);
+  await seedOwner(owner);
+}
+
+/** Runs `seed:system` through an existing owner pool (the pool stays open). */
+export async function seedOwner(owner: pg.Pool): Promise<void> {
+  await seedSystemCategories(createKysely(owner));
 }

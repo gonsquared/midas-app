@@ -1,13 +1,14 @@
 import * as Menu from '@radix-ui/react-dropdown-menu';
+import { useRef } from 'react';
 import { ArrowLeftRight, ChevronDown, Plus, TrendingDown, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useToast } from '@/components/ui/toast';
+import { useOverlays } from '@/features/transactions/composer-store';
 import { cn } from '@/lib/cn';
 
 const ADD_ACTIONS = [
-  { label: 'Expense', icon: TrendingDown },
-  { label: 'Income', icon: TrendingUp },
-  { label: 'Transfer', icon: ArrowLeftRight },
+  { label: 'Expense', type: 'expense', icon: TrendingDown },
+  { label: 'Income', type: 'income', icon: TrendingUp },
+  { label: 'Transfer', type: 'transfer', icon: ArrowLeftRight },
 ] as const;
 
 export const menuContentClass =
@@ -17,12 +18,10 @@ export const menuItemClass =
   'data-[highlighted]:bg-sunken data-[highlighted]:outline-2 data-[highlighted]:-outline-offset-2 ' +
   'data-[highlighted]:outline-focus-ring pointer-coarse:h-11';
 
-/**
- * The single global action. Opens Expense, Income, Transfer. The composer itself ships with the
- * transactions feature; until then choosing an entry only acknowledges it.
- */
+/** The single global action: opens the composer on the current page (?compose=). */
 export function AddMenu({ variant = 'header' }: { variant?: 'header' | 'bar' }) {
-  const { toast } = useToast();
+  const { openCompose } = useOverlays();
+  const chose = useRef(false);
   return (
     <Menu.Root modal={false}>
       <Menu.Trigger asChild>
@@ -46,17 +45,24 @@ export function AddMenu({ variant = 'header' }: { variant?: 'header' | 'bar' }) 
         )}
       </Menu.Trigger>
       <Menu.Portal>
-        <Menu.Content align="end" sideOffset={6} className={menuContentClass}>
-          {ADD_ACTIONS.map(({ label, icon: Icon }) => (
+        <Menu.Content
+          align="end"
+          sideOffset={6}
+          className={menuContentClass}
+          // After choosing a type the composer takes focus; the menu must not pull it back.
+          onCloseAutoFocus={(event) => {
+            if (chose.current) event.preventDefault();
+            chose.current = false;
+          }}
+        >
+          {ADD_ACTIONS.map(({ label, type, icon: Icon }) => (
             <Menu.Item
               key={label}
               className={menuItemClass}
-              onSelect={() =>
-                toast({
-                  title: `${label} entry is coming soon`,
-                  description: 'The composer arrives with transactions.',
-                })
-              }
+              onSelect={() => {
+                chose.current = true;
+                openCompose(type);
+              }}
             >
               <Icon aria-hidden="true" className="size-4" />
               {label}

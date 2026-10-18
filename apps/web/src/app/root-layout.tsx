@@ -1,5 +1,6 @@
 import { Outlet, useRouterState } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
+import { useCrossTabSignOut } from '@/features/auth/hooks';
 
 export const TITLE_SUFFIX = 'Midas';
 
@@ -17,7 +18,17 @@ function usePageChrome(): string {
       return undefined;
     },
   });
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  // Overlay child routes (/wallets/new) share their parent's page, so they must not re-announce
+  // the page or pull focus out of the dialog that just opened.
+  const pageKey = useRouterState({
+    select: (state) => {
+      for (let i = state.matches.length - 1; i >= 0; i -= 1) {
+        const match = state.matches[i];
+        if (match?.staticData.title) return match.routeId;
+      }
+      return state.location.pathname;
+    },
+  });
   const [announcement, setAnnouncement] = useState('');
   const initial = useRef(true);
 
@@ -28,14 +39,27 @@ function usePageChrome(): string {
       return;
     }
     setAnnouncement(title ?? '');
-    document.querySelector<HTMLElement>('main h1')?.focus();
-  }, [pathname, title]);
+    // A lazily loaded page may not have rendered its h1 yet: retry briefly.
+    let attempts = 0;
+    let timer: number | undefined;
+    const focusHeading = () => {
+      const heading = document.querySelector<HTMLElement>('main h1');
+      if (heading) heading.focus();
+      else if (attempts < 40) {
+        attempts += 1;
+        timer = window.setTimeout(focusHeading, 50);
+      }
+    };
+    focusHeading();
+    return () => window.clearTimeout(timer);
+  }, [pageKey, title]);
 
   return announcement;
 }
 
 export function RootLayout() {
   const announcement = usePageChrome();
+  useCrossTabSignOut();
   return (
     <>
       <Outlet />

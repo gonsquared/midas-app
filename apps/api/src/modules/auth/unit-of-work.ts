@@ -2,6 +2,7 @@ import type { Kysely } from 'kysely';
 import { withTransaction } from '../../platform/db/client.js';
 import type { Database } from '../../platform/db/database.js';
 import {
+  createPasswordResetTokensRepository,
   createSessionsRepository,
   createUsersRepository,
   type AuthUnitOfWork,
@@ -10,6 +11,10 @@ import {
 export function createAuthUnitOfWork(db: Kysely<Database>): AuthUnitOfWork {
   return (fn) =>
     withTransaction(db, (trx) =>
-      fn({ users: createUsersRepository(trx), sessions: createSessionsRepository(trx) }),
+      fn({
+        users: createUsersRepository(trx),
+        sessions: createSessionsRepository(trx),
+        resetTokens: createPasswordResetTokensRepository(trx),
+      }),
     );
 }

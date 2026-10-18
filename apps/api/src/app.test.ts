@@ -159,7 +159,7 @@ describe('security headers', () => {
 
   it('sends HSTS in production only', async () => {
     app = await buildTestApp({
-      env: { NODE_ENV: 'production' },
+      env: { NODE_ENV: 'production', APP_BASE_URL: 'https://midas.example.com' },
       checkDatabase: async () => true,
     });
     const res = await app.inject({ method: 'GET', url: '/health' });

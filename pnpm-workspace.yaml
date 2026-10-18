@@ -1,6 +1,7 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+  - 'e2e'
 
 # Dependency audit policy (CI runs `pnpm audit --audit-level=high` over ALL dependencies, because
 # the runtime image ships devDependencies and runs the API through tsx).

@@ -5,16 +5,23 @@ import { ErrorBoundary } from '@/app/error-boundary';
 import { AppProviders } from '@/app/providers';
 import { createAppRouter } from '@/app/router';
 import { setSessionExpiredHandler } from '@/lib/api-client';
+import { DEFAULT_RETURN_PATH, safeReturnPath } from '@/lib/redirect';
 import { createQueryClient } from '@/lib/query-client';
 import './styles/index.css';
 
 const queryClient = createQueryClient();
 const router = createAppRouter();
 
-// Forced sign-out (refresh rejected): drop cached data and go to sign-in.
+// Forced sign-out (refresh rejected): drop cached data and go to sign-in, remembering where the
+// user was (validated again on the way back).
 setSessionExpiredHandler(() => {
   queryClient.clear();
-  void router.navigate({ to: '/login' });
+  const back = safeReturnPath(router.state.location.href);
+  void router.navigate({
+    to: '/login',
+    search:
+      back === DEFAULT_RETURN_PATH ? { reason: 'expired' } : { reason: 'expired', redirect: back },
+  });
 });
 
 const container = document.getElementById('root');

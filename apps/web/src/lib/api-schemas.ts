@@ -1,4 +1,4 @@
-import type { AuthSession, FieldError, Problem } from '@midas/shared';
+import type { AuthSession, FieldError, Problem, User } from '@midas/shared';
 
 /*
  * Runtime guards for the two payloads the client itself must understand (session and problem).
@@ -48,24 +48,39 @@ export function parseProblem(body: unknown): Problem | undefined {
   return { type, title, status, detail, instance, code, requestId, ...(errors ? { errors } : {}) };
 }
 
-/** Throws unless the body is a well-formed AuthSession (token, expiry and the user fields the UI reads). */
+/** Throws unless the body is a well-formed User (the fields the UI reads). */
+export function parseUser(body: unknown): User {
+  if (
+    !isObject(body) ||
+    !isString(body['id']) ||
+    !isString(body['email']) ||
+    !isString(body['displayName']) ||
+    (body['role'] !== 'user' && body['role'] !== 'admin') ||
+    !isObject(body['preferences'])
+  ) {
+    throw new Error('Invalid user response');
+  }
+  const preferences = body['preferences'];
+  if (
+    !isString(preferences['currency']) ||
+    !isString(preferences['locale']) ||
+    !isString(preferences['timezone']) ||
+    !isString(preferences['theme'])
+  ) {
+    throw new Error('Invalid user response');
+  }
+  return body as unknown as User;
+}
+
+/** Throws unless the body is a well-formed AuthSession (token, expiry and the user). */
 export function parseAuthSession(body: unknown): AuthSession {
   if (!isObject(body) || !isString(body['accessToken']) || body['accessToken'] === '') {
     throw new Error('Invalid session response');
   }
-  const user = body['user'];
-  if (
-    !isString(body['accessTokenExpiresAt']) ||
-    !isObject(user) ||
-    !isString(user['id']) ||
-    !isString(user['email']) ||
-    !isString(user['displayName']) ||
-    (user['role'] !== 'user' && user['role'] !== 'admin') ||
-    !isObject(user['preferences'])
-  ) {
-    throw new Error('Invalid session response');
-  }
+  if (!isString(body['accessTokenExpiresAt'])) throw new Error('Invalid session response');
+  parseUser(body['user']);
   return body as unknown as AuthSession;
 }
 
 export const authSessionParser = { parse: parseAuthSession };
+export const userParser = { parse: parseUser };
