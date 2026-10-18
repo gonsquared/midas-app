@@ -14,7 +14,11 @@ export default defineConfig({
     baseURL: process.env['E2E_BASE_URL'] ?? 'http://localhost:5173',
     trace: 'retain-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    // Phone viewport: auth flows only; the wallets and ledger specs assert desktop layouts.
+    { name: 'mobile', use: { ...devices['Pixel 7'] }, testMatch: /auth\.spec\.ts/ },
+  ],
   webServer: process.env['E2E_BASE_URL']
     ? undefined
     : {
