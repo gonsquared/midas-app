@@ -464,11 +464,11 @@ E1-F2-S3, E2-F1-S1, E3-F1-S1, E4-F1-S1, E5-F1-S1, E6-F1-S1, E8-F1-S1 and E9-F1-S
 
 ### Production
 
-- One production image (`infra/docker/Dockerfile`, target `runtime`), built from the `master` branch in CI and pushed to GitHub Container Registry. It contains the API plus the built SPA. It runs as non-root, has a healthcheck on `/health`, and handles SIGTERM with graceful shutdown that drains Fastify and stops the scheduler.
+- One production image (`infra/docker/Dockerfile`, target `runtime`), built from the `master` branch in CI (today the image is built but not pushed; publishing to GitHub Container Registry is planned with `release.yml`). It contains the API plus the built SPA. It runs as non-root, has a healthcheck on `/health`, and handles SIGTERM with graceful shutdown that drains Fastify and stops the scheduler.
 - One managed relational database (engine per db-agent) with automated backups.
 - One SMTP provider (any provider that offers SMTP; configured via environment).
 - Migrations run as a release or pre-deploy command (`node dist/cli.js migrate`) before the new version takes traffic. Migrations must be backward compatible for one release (expand, then contract).
-- **Reference one-click target:** a Render Blueprint (`infra/render.yaml`) defining a Docker web service and a managed database, with a "Deploy" button in the README. The image is host-agnostic, and `docs/operations/deployment.md` also covers Fly.io (`fly.toml`) and a single VPS (`infra/compose.prod.yaml` with Caddy for automatic TLS).
+- **Reference one-click target (planned, not yet in the repo):** a Render Blueprint (`infra/render.yaml`) defining a Docker web service and a managed database, with a "Deploy" button in the README. The image is host-agnostic, and `docs/operations/deployment.md` also covers Fly.io (`fly.toml`) and a single VPS (`infra/compose.prod.yaml` with Caddy for automatic TLS).
 - **Scheduler placement:** `SCHEDULER_ENABLED=true` on the web service by default, which works on single-instance hosts. When scaling to several instances, either keep it enabled everywhere (database coordination makes this safe) or run a dedicated worker from the same image (`node dist/worker.js`) and disable it on web instances. For hosts that prefer cron, `node dist/cli.js jobs:run recurring` runs one tick and exits.
 - **Rollback:** redeploy the previous image tag; expand/contract migrations keep the previous version compatible. Restore from a database point-in-time backup only when data is corrupted. Runbook: `docs/operations/runbook.md`.
 
@@ -501,14 +501,19 @@ interface Mailer { send(message: { to: string; subject: string; text: string; ht
 
 ### CI (GitHub Actions)
 
-| Workflow | Runs |
-| --- | --- |
-| `ci.yml`, on PRs and pushes to `master` | install (cached) → lint → typecheck → unit tests → integration tests (database service container) → build → Docker build (no push on PRs) → coverage gate |
-| `security.yml` | gitleaks on every PR and push; `pnpm audit --audit-level high` plus osv-scanner; CodeQL weekly and on PRs |
-| `e2e.yml` | on PRs to `master`, plus nightly: compose stack from the production image, then Playwright with axe |
-| `release.yml` | on `v*` tags: build and push the image, generate the OpenAPI artifact, create a GitHub release |
+**Implemented today.** One workflow, `ci.yml`, runs on PRs and pushes to `master`, as five parallel jobs:
 
-Branch protection on `master` requires `ci`, `security` and `e2e`.
+| Job | Runs |
+| --- | --- |
+| Lint, format, typecheck, test, build | install (cached) → lint → format check → typecheck → unit and integration tests → build → web bundle dev-code check → migrations and seed applied twice to a scratch database → generated database types up to date |
+| Secret scan (gitleaks) | gitleaks over full history with `.gitleaks.toml` |
+| Dependency audit | `pnpm audit --audit-level=high` over all dependencies |
+| Docker image build (no push) | builds the `runtime` target |
+| Browser tests (Playwright, fake API) | Playwright against the Vite dev server |
+
+Branch protection on `master` requires these five checks.
+
+**Planned, not yet implemented.** A coverage gate; osv-scanner and CodeQL; a nightly end-to-end run against the compose stack built from the production image with axe checks (needs the SPA served by the API, see ADR-004); and a `release.yml` on `v*` tags that builds and pushes the image, generates the OpenAPI artifact and creates a GitHub release. These arrive with the Sprint 4 stories, and branch protection will be extended when they exist.
 
 ---
 
@@ -546,10 +551,10 @@ Test data is synthetic. No real personal data appears in fixtures.
 | R10 | No idempotency keys on POST `/transactions` or `/transfers` | Double-submit duplicates | UI disables submit while pending; `Idempotency-Key` header is a candidate for v1.1 |
 | R11 | Last-write-wins on concurrent edits | Rare overwrites | Personal data, so concurrent editors are unlikely; ETag/`If-Match` deferred |
 | R12 | Fetch-to-blob CSV download buffers in browser memory | Very large exports use client RAM | Acceptable at personal scale; signed short-lived download URLs later |
-| R13 | Database engine not yet confirmed (ADR-016) | Compose and CI placeholders may change | db-agent confirms in E1-F2-S3, before any schema work |
-| R14 | The brief names the default branch `master`; the current checkout reports `main` | CI branch filters and protection misconfigured | cicd-agent confirms the branch name in E1-F1-S2 |
+| R13 | Database engine not yet confirmed (ADR-016) | Compose and CI placeholders may change | **Resolved:** ADR-016 accepted, PostgreSQL 17 |
+| R14 | The brief names the default branch `master`; an early checkout reported `main` | CI branch filters and protection misconfigured | **Resolved:** the default branch is `master`; `ci.yml` and branch protection target it |
 | R15 | UI copy is English-only in v1; locale affects number and date formatting only | Limited localization | Strings kept in one module per feature so i18n can be added later |
-| R16 | The tracker requires ADRs under `docs/adr/`; this log lives in §14 | Story E1-F1-S1 acceptance criterion | docs-agent mirrors §14 into `docs/adr/NNNN-*.md` during E1-F4-S3 |
+| R16 | The tracker requires ADRs under `docs/adr/`; this log lives in §14 | Story E1-F1-S1 acceptance criterion | **Resolved:** §14 is mirrored into `docs/adr/NNN-*.md` |
 
 Any discrepancy between `api-contract.md` and implementation needs must be raised as a risk to the architect, never fixed by editing the contract downstream.
 

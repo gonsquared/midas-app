@@ -402,7 +402,7 @@ Requirement IDs use `REQ-<epic>.<feature>.<seq>`. Epic and feature numbers follo
 - Single currency per wallet; no foreign exchange rates; totals are shown per currency.
 - No email verification at registration in v1 (additive later).
 - A single application instance in v1; in-memory rate limits are acceptable until scaling out.
-- The brief names the default branch `master` while the current checkout reports `main`; cicd-agent confirms in E1-F1-S2 (architecture risk R14).
+- The default branch is `master` (confirmed; architecture risk R14 is resolved).
 - TODO: audit log retention of 400 days is proposed and still to be confirmed (architecture section 8.5).
 - TODO: the contract has no error code for a wallet balance outside the allowed range (database.md open item 1; architect to resolve).
 - UI copy is English-only; locale affects formatting only.

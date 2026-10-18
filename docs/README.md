@@ -7,6 +7,11 @@ Everything a contributor or operator needs, in one place. Start with the root
 | --- | --- |
 | Run the app locally (Docker Compose, hot reload, reset the database) | [README: Run with Docker Compose](../README.md#run-with-docker-compose) and [CONTRIBUTING: Docker](../CONTRIBUTING.md#docker-local-stack) |
 | Contribute code, run lint and tests, follow the PR process | [CONTRIBUTING.md](../CONTRIBUTING.md) |
+| Understand what Midas is for and what it must do | [Project brief](./project-brief.md) and [Specifications](./SPECS.md) (goals, personas, requirements, glossary) |
+| Understand the architecture, stack, security approach, testing strategy and risks | [Architecture](./architecture.md) |
+| Read the full API contract (conventions, models, every endpoint) | [API contract](./api-contract.md). The [OpenAPI draft](../apps/api/openapi/openapi.yaml) tracks what is implemented; the contract is the design authority |
+| Understand the database design in depth (schema, indexes, consistency, backup) | [Database design](./database.md) |
+| Build or review UI (design system, flows, layouts, accessibility, microcopy) | [UI design](./ui-design.md) |
 | Understand why the system is built this way | [Architecture decision records](./adr/README.md) (18 decisions: stack, auth, money, scheduling, deployment) |
 | Call or extend the API | [OpenAPI 3.1 draft](../apps/api/openapi/openapi.yaml), with each operation tagged implemented or planned |
 | Understand the database, migrations and seeds | [apps/api/db/README.md](../apps/api/db/README.md) |

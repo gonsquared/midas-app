@@ -13,13 +13,13 @@ Thanks for helping build Midas. This guide describes the setup, checks and conve
 
   The exact pnpm version is pinned by the `packageManager` field in the root `package.json`.
 
-- **Docker** is needed later for the local database and end-to-end stack; it is not required for the scaffold.
+- **Docker** with Compose runs the local stack (database, Mailpit, API, web) and is needed for the database-backed API tests (Testcontainers). Without Docker those tests are skipped.
 
 ## Setup
 
 ```bash
 pnpm install
-cp .env.example .env.local   # optional, only when you need local overrides
+cp .env.example .env         # replace every change-me-* placeholder; the API and Docker Compose read this file
 ```
 
 Never commit `.env` or `.env.*` files other than `.env.example`. Do not put real secrets, tokens or credentials into any tracked file.
@@ -39,14 +39,15 @@ Workspace packages are declared in `pnpm-workspace.yaml`. Packages must only imp
 
 ## Daily commands
 
-| Command             | What it does                                       |
-| ------------------- | -------------------------------------------------- |
-| `pnpm lint`         | ESLint (flat config) across the repository         |
-| `pnpm format`       | Prettier, writes changes                           |
-| `pnpm format:check` | Prettier, fails on unformatted files (used in CI)  |
-| `pnpm typecheck`    | `tsc --noEmit` in every workspace that defines it  |
-| `pnpm test`         | Unit tests in every workspace that defines them    |
-| `pnpm build`        | Builds every workspace that defines a build script |
+| Command             | What it does                                        |
+| ------------------- | --------------------------------------------------- |
+| `pnpm lint`         | ESLint (flat config) across the repository          |
+| `pnpm format`       | Prettier, writes changes                            |
+| `pnpm format:check` | Prettier, fails on unformatted files (used in CI)   |
+| `pnpm typecheck`    | `tsc --noEmit` in every workspace that defines it   |
+| `pnpm test`         | Unit tests in every workspace that defines them     |
+| `pnpm build`        | Builds every workspace that defines a build script  |
+| `pnpm test:e2e`     | Playwright browser tests (see the README for setup) |
 
 Run `pnpm lint && pnpm format:check && pnpm typecheck` before opening a pull request.
 
