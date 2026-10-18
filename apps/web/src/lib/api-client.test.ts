@@ -268,3 +268,46 @@ describe('api client query strings', () => {
     );
   });
 });
+
+describe('download and parseFilename', () => {
+  it('accepts only a plain attachment name', async () => {
+    const { parseFilename } = await import('./api-client');
+    expect(parseFilename('attachment; filename="midas-transactions-20261016.csv"')).toBe(
+      'midas-transactions-20261016.csv',
+    );
+    expect(parseFilename('attachment; filename="../etc/passwd"')).toBeUndefined();
+    expect(parseFilename('attachment; filename=".hidden"')).toBeUndefined();
+    expect(parseFilename('attachment; filename="a/b.csv"')).toBeUndefined();
+    expect(parseFilename('attachment; filename="x.csv')).toBeUndefined();
+    expect(parseFilename('attachment; filename="a b.csv"')).toBeUndefined();
+    expect(parseFilename('attachment; filename=plain.csv; size=3')).toBe('plain.csv');
+    expect(parseFilename('attachment; filename=plain.csv')).toBe('plain.csv');
+    expect(parseFilename(null)).toBeUndefined();
+  });
+
+  it('returns the body as a blob with the bearer token and maps errors', async () => {
+    const calls: Array<{ url: string; auth: string | null }> = [];
+    const doFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), auth: new Headers(init?.headers).get('Authorization') });
+      return calls.length === 1
+        ? new Response('a,b\n', {
+            headers: { 'Content-Disposition': 'attachment; filename="x.csv"' },
+          })
+        : new Response('{}', { status: 400 });
+    }) as typeof fetch;
+    const { createApiClient } = await import('./api-client');
+    const client = createApiClient({
+      fetch: doFetch,
+      session: {
+        getAccessToken: () => 'tok',
+        setSession: () => undefined,
+        clearSession: () => undefined,
+      },
+    });
+    const result = await client.download('/transactions/export', { query: { q: 'a' } });
+    expect(await result.blob.text()).toBe('a,b\n');
+    expect(result.filename).toBe('x.csv');
+    expect(calls[0]).toEqual({ url: '/api/v1/transactions/export?q=a', auth: 'Bearer tok' });
+    await expect(client.download('/transactions/export')).rejects.toMatchObject({ status: 400 });
+  });
+});

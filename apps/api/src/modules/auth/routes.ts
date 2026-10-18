@@ -33,7 +33,11 @@ export interface AuthRoutesOptions {
 
 function requestContext(request: FastifyRequest): RequestContext {
   const userAgent = request.headers['user-agent'];
-  return { ip: request.ip, userAgent: typeof userAgent === 'string' ? userAgent : null };
+  return {
+    ip: request.ip,
+    userAgent: typeof userAgent === 'string' ? userAgent : null,
+    requestId: request.serverRequestId,
+  };
 }
 
 function sendSession(
@@ -155,7 +159,7 @@ export function authRoutes(app: FastifyInstance, options: AuthRoutesOptions): vo
     try {
       if (!token)
         throw new AppError('SESSION_INVALID', 'The session is no longer valid. Sign in again.');
-      const result = await service.refresh(token);
+      const result = await service.refresh(token, requestContext(request));
       return sendSession(reply, 200, result);
     } catch (error) {
       // A failed refresh always clears the cookie (api-contract 1.6).
@@ -167,19 +171,23 @@ export function authRoutes(app: FastifyInstance, options: AuthRoutesOptions): vo
   app.post('/api/v1/auth/logout', async (request, reply) => {
     // A bearer token is not CSRF-prone; the cookie path needs the CSRF checks.
     let sessionId: string | undefined;
+    let userId: string | undefined;
     const bearer = bearerToken(request.headers.authorization);
     if (bearer) {
-      sessionId = await service
-        .authenticate(bearer)
-        .then((context) => context.sessionId)
-        .catch(() => undefined);
+      const principal = await service.authenticate(bearer).catch(() => undefined);
+      sessionId = principal?.sessionId;
+      userId = principal?.userId;
     }
     if (sessionId === undefined) assertCsrfProtected(request, appOrigin);
 
-    await service.logout({
-      sessionId,
-      refreshToken: readCookie(request.headers.cookie, REFRESH_COOKIE),
-    });
+    await service.logout(
+      {
+        sessionId,
+        userId,
+        refreshToken: readCookie(request.headers.cookie, REFRESH_COOKIE),
+      },
+      requestContext(request),
+    );
     return reply
       .code(204)
       .header('Cache-Control', 'no-store')
@@ -194,7 +202,7 @@ export function authRoutes(app: FastifyInstance, options: AuthRoutesOptions): vo
     // 3/hour per email hash; identical for known and unknown addresses.
     await forgotPerEmail(request, reply, hashKey(parsed.data.email));
 
-    passwords.requestReset(parsed.data.email);
+    passwords.requestReset(parsed.data.email, requestContext(request));
     return reply.code(202).header('Cache-Control', 'no-store').send({ status: 'accepted' });
   });
 
@@ -210,7 +218,7 @@ export function authRoutes(app: FastifyInstance, options: AuthRoutesOptions): vo
     await resetPerIp(request, reply);
     const parsed = ResetPasswordRequestSchema.safeParse(request.body);
     if (!parsed.success) throw validationError(parsed.error);
-    await passwords.resetPassword(parsed.data);
+    await passwords.resetPassword(parsed.data, requestContext(request));
     return reply.code(204).header('Cache-Control', 'no-store').send();
   });
 }

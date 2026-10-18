@@ -90,3 +90,43 @@ export function datePresets(today: string): Record<DatePresetKey, DateRange> {
     'this-year': { from: `${year}-01-01`, to: `${year}-12-31` },
   };
 }
+
+/** Whole days from `from` to `to` (negative when `to` is earlier). */
+export function daysBetween(from: string, to: string): number {
+  return Math.round((toUtc(to).getTime() - toUtc(from).getTime()) / MS_PER_DAY);
+}
+
+/** Inclusive number of calendar days in a range. */
+export function rangeLengthDays(range: DateRange): number {
+  return daysBetween(range.from, range.to) + 1;
+}
+
+/** First day of the month containing `value`, moved by `months` months. */
+export function startOfMonth(value: string, months = 0): string {
+  const [year, month] = parts(value);
+  const index = year * 12 + (month - 1) + months;
+  return `${String(Math.floor(index / 12)).padStart(4, '0')}-${pad((index % 12) + 1)}-01`;
+}
+
+export function endOfMonth(value: string): string {
+  const [year, month] = parts(value);
+  return `${String(year).padStart(4, '0')}-${pad(month)}-${pad(lastDayOfMonth(year, month))}`;
+}
+
+/** The Monday of the ISO week containing `value`. */
+export function startOfWeek(value: string): string {
+  const weekday = toUtc(value).getUTCDay(); // 0 = Sunday
+  return addDays(value, -((weekday + 6) % 7));
+}
+
+/** The same day shifted by whole years (29 Feb moves to 28 Feb in a non-leap year). */
+export function addYears(value: string, years: number): string {
+  const [year, month, day] = parts(value);
+  const target = year + years;
+  return `${String(target).padStart(4, '0')}-${pad(month)}-${pad(Math.min(day, lastDayOfMonth(target, month)))}`;
+}
+
+/** True when the range covers exactly one calendar month. */
+export function isWholeMonth(range: DateRange): boolean {
+  return range.from === startOfMonth(range.from) && range.to === endOfMonth(range.from);
+}

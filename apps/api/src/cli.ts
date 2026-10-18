@@ -2,8 +2,21 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { seedSystemCategories } from '../db/seeds/system-categories.js';
 import { parseArgs, parseCount } from './cli-args.js';
-import { ConfigError, loadMigrationConnection } from './platform/config.js';
-import { createOwnerDatabaseClient } from './platform/db/client.js';
+import {
+  parseEmailArg,
+  promptHidden,
+  readFirstLine,
+  runAdminCreate,
+  runAdminPromote,
+} from './cli-admin.js';
+import { createRecurringTask } from './modules/recurring/jobs.js';
+import { systemClock } from './platform/clock.js';
+import { ConfigError, loadConfig, loadMigrationConnection } from './platform/config.js';
+import {
+  createDatabaseClient,
+  createOwnerDatabaseClient,
+  poolSettingsFromConfig,
+} from './platform/db/client.js';
 import {
   getMigrationStatus,
   MIGRATIONS_DIR,
@@ -26,7 +39,12 @@ Commands:
   migrate:status                  List applied and pending migrations
   migrate:verify                  Up, snapshot, down to zero, up again, compare (empty database only)
   migrate:create <name>           Scaffold a migration file (development only), kebab-case name
-  seed:system                     Insert missing system categories (idempotent, never overwrites)`;
+  seed:system                     Insert missing system categories (idempotent, never overwrites)
+  admin:create --email <email>    Create a NEW admin account (fails if the email exists; use admin:promote).
+               [--display-name <name>] [--password-stdin]
+                                  The password is prompted for (hidden) or read from stdin.
+  admin:promote --email <email>   Promote an existing account to admin (audit-logged)
+  jobs:run recurring              Run one recurring-generation pass and exit (for cron hosts)`;
 
 const NAME_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
@@ -111,6 +129,60 @@ async function main(argv: string[]): Promise<number> {
       const { db } = createOwnerDatabaseClient(loadMigrationConnection());
       try {
         await seedSystemCategories(db, { logger });
+      } finally {
+        await db.destroy();
+      }
+      return 0;
+    }
+    case 'admin:create': {
+      const email = parseEmailArg(flags.get('email'));
+      const displayName = flags.get('display-name');
+      const { db } = createOwnerDatabaseClient(loadMigrationConnection());
+      try {
+        const outcome = await runAdminCreate(db, {
+          email,
+          displayName: typeof displayName === 'string' ? displayName : undefined,
+          readPassword: () =>
+            flags.has('password-stdin')
+              ? readFirstLine(process.stdin)
+              : promptHidden('Password for the new admin: '),
+        });
+        console.log(`admin:create: ${outcome}`);
+      } finally {
+        await db.destroy();
+      }
+      return 0;
+    }
+    case 'admin:promote': {
+      const email = parseEmailArg(flags.get('email'));
+      const { db } = createOwnerDatabaseClient(loadMigrationConnection());
+      try {
+        const outcome = await runAdminPromote(db, email);
+        console.log(`admin:promote: ${outcome}`);
+        return outcome === 'user_not_found' ? 1 : 0;
+      } finally {
+        await db.destroy();
+      }
+    }
+    case 'jobs:run': {
+      if (positionals[0] !== 'recurring') {
+        console.error('Usage: jobs:run recurring');
+        return 1;
+      }
+      const config = loadConfig();
+      const { db } = createDatabaseClient(poolSettingsFromConfig(config));
+      try {
+        const task = createRecurringTask({
+          db,
+          clock: systemClock,
+          config,
+          logger: {
+            info: (_obj, message) => console.log(message),
+            warn: (_obj, message) => console.warn(message),
+            error: (_obj, message) => console.error(message),
+          },
+        });
+        console.log(JSON.stringify(await task.run({ aborted: false })));
       } finally {
         await db.destroy();
       }

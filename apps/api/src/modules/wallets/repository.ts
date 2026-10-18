@@ -150,15 +150,37 @@ export function createWalletsRepository(db: DbHandle) {
       await db.deleteFrom('wallets').where('userId', '=', userId).where('id', '=', id).execute();
     },
 
-    /** AP-18 probe; the foreign keys remain the final guard against races. */
+    /**
+     * AP-18 probe: does the wallet have transactions or recurring templates? Both block a delete
+     * and a currency change. The foreign keys remain the final guard against races.
+     */
     async hasLedgerRows(walletId: string): Promise<boolean> {
-      const row = await db
+      const transaction = await db
         .selectFrom('transactions')
         .select('id')
         .where('walletId', '=', walletId)
         .limit(1)
         .executeTakeFirst();
-      return row !== undefined;
+      if (transaction !== undefined) return true;
+      const template = await db
+        .selectFrom('recurringTemplates')
+        .select('id')
+        .where('walletId', '=', walletId)
+        .limit(1)
+        .executeTakeFirst();
+      return template !== undefined;
+    },
+
+    /** Archiving pauses the wallet's active templates in the same transaction (api-contract 6). */
+    async pauseActiveTemplates(userId: string, walletId: string): Promise<number> {
+      const result = await db
+        .updateTable('recurringTemplates')
+        .set({ status: 'paused' })
+        .where('userId', '=', userId)
+        .where('walletId', '=', walletId)
+        .where('status', '=', 'active')
+        .executeTakeFirst();
+      return Number(result.numUpdatedRows);
     },
   };
 }

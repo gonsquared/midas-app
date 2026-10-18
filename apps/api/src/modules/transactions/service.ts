@@ -5,6 +5,7 @@ import type {
   TransactionPage,
   UpdateTransactionRequest,
 } from '@midas/shared';
+import type { Readable } from 'node:stream';
 import type { Kysely } from 'kysely';
 import { v7 as uuidv7 } from 'uuid';
 import type { Database } from '../../platform/db/database.js';
@@ -12,8 +13,9 @@ import { AppError } from '../../platform/errors.js';
 import { createCategoriesRepository, type CategoryRecord } from '../categories/repository.js';
 import { createWalletsRepository } from '../wallets/repository.js';
 import { toTransactionDto } from './dto.js';
+import { streamTransactionsCsv } from './export.js';
 import { ledgerTransaction, LedgerRowMoved } from './errors.js';
-import { listTransactionRows } from './list-query.js';
+import { listTransactionRows, type TransactionFilters } from './list-query.js';
 import {
   createTransactionsRepository,
   type LockedTransaction,
@@ -56,6 +58,11 @@ export class TransactionService {
   async list(userId: string, query: ListTransactionsQuery): Promise<TransactionPage> {
     const { rows, nextCursor } = await listTransactionRows(this.deps.db, userId, query);
     return { items: rows.map(toTransactionDto), nextCursor };
+  }
+
+  /** CSV of the filtered transactions, streamed with constant memory (E5-F3-S1). */
+  exportCsv(userId: string, query: TransactionFilters): Readable {
+    return streamTransactionsCsv(this.deps.db, userId, query);
   }
 
   async get(userId: string, id: string): Promise<Transaction> {

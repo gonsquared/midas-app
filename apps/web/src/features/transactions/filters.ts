@@ -247,3 +247,9 @@ export function groupByDay<T extends { occurredOn: string }>(
   }
   return groups;
 }
+
+/** The export endpoint takes the list filters and sort, but no pagination (api-contract 8). */
+export function toExportQuery(filters: TransactionFilters) {
+  const { limit: _limit, ...query } = toApiQuery(filters);
+  return query;
+}

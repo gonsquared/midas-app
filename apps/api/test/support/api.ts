@@ -117,3 +117,50 @@ export function refreshHeaders(token: string) {
     'x-csrf-protection': '1',
   };
 }
+
+/**
+ * Promotes a user to admin directly in the database (owner connection). The role is read from the
+ * database on every request, so the user's existing access token becomes an admin token.
+ */
+export async function makeAdmin(owner: pg.Pool, userId: string): Promise<void> {
+  await owner.query(`update users set role = 'admin' where id = $1`, [userId]);
+}
+
+/** Registers a user and promotes it to admin. */
+export async function registerAdmin(
+  app: FastifyInstance,
+  owner: pg.Pool,
+  overrides: Record<string, unknown> = {},
+): Promise<TestUser> {
+  const user = await registerUser(app, overrides);
+  await makeAdmin(owner, user.id);
+  return user;
+}
+
+export interface AuditRow {
+  action: string;
+  actor_user_id: string | null;
+  target_type: string;
+  target_id: string | null;
+  ip: string | null;
+  user_agent: string | null;
+  request_id: string | null;
+  metadata: Record<string, unknown>;
+}
+
+/** Audit rows (oldest first) for assertions, optionally limited to some actions. */
+export async function auditRows(owner: pg.Pool, actions?: string[]): Promise<AuditRow[]> {
+  const result = actions
+    ? await owner.query(
+        `select action, actor_user_id, target_type, target_id, host(ip) as ip, user_agent,
+                request_id, metadata
+           from audit_logs where action = any($1) order by occurred_at, id`,
+        [actions],
+      )
+    : await owner.query(
+        `select action, actor_user_id, target_type, target_id, host(ip) as ip, user_agent,
+                request_id, metadata
+           from audit_logs order by occurred_at, id`,
+      );
+  return result.rows as AuditRow[];
+}

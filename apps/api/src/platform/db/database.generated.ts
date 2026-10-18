@@ -3,13 +3,53 @@
  * Please do not edit it manually.
  */
 
-import type { ColumnType } from "kysely";
+import type { ColumnType } from 'kysely';
 
-export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
-  ? ColumnType<S, I | undefined, U>
-  : ColumnType<T, T | undefined, T>;
+export type Generated<T> =
+  T extends ColumnType<infer S, infer I, infer U>
+    ? ColumnType<S, I | undefined, U>
+    : ColumnType<T, T | undefined, T>;
+
+export type Json = JsonValue;
+
+export type JsonArray = JsonValue[];
+
+export type JsonObject = {
+  [x: string]: JsonValue | undefined;
+};
+
+export type JsonPrimitive = boolean | number | string | null;
+
+export type JsonValue = JsonArray | JsonObject | JsonPrimitive;
 
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
+
+export interface AuditLogs {
+  action: string;
+  actorUserId: string | null;
+  id: Generated<string>;
+  ip: string | null;
+  metadata: Generated<Json>;
+  occurredAt: Generated<Timestamp>;
+  requestId: string | null;
+  targetId: string | null;
+  targetType: string;
+  userAgent: string | null;
+}
+
+export interface Budgets {
+  amountMinor: number;
+  categoryId: string | null;
+  createdAt: Generated<Timestamp>;
+  currency: string;
+  id: Generated<string>;
+  period: Generated<string>;
+  scope: string;
+  startDate: string;
+  updatedAt: Generated<Timestamp>;
+  userId: string;
+  warningThresholdPct: Generated<number>;
+}
 
 export interface Categories {
   color: string;
@@ -31,6 +71,40 @@ export interface PasswordResetTokens {
   tokenHash: Buffer;
   usedAt: Timestamp | null;
   userId: string;
+}
+
+export interface RecurringRuns {
+  attempts: Generated<number>;
+  createdAt: Generated<Timestamp>;
+  errorCode: string | null;
+  id: Generated<string>;
+  occurrenceDate: string;
+  status: string;
+  templateId: string;
+  transactionId: string | null;
+  updatedAt: Generated<Timestamp>;
+}
+
+export interface RecurringTemplates {
+  amountMinor: number;
+  categoryId: string;
+  consecutiveFailures: Generated<number>;
+  createdAt: Generated<Timestamp>;
+  endDate: string | null;
+  frequency: string;
+  id: Generated<string>;
+  intervalCount: Generated<number>;
+  lastError: string | null;
+  lastRunAt: Timestamp | null;
+  name: string;
+  nextRunOn: string | null;
+  note: string | null;
+  startDate: string;
+  status: Generated<string>;
+  type: string;
+  updatedAt: Generated<Timestamp>;
+  userId: string;
+  walletId: string;
 }
 
 export interface Sessions {
@@ -56,6 +130,7 @@ export interface Transactions {
   id: Generated<string>;
   note: string | null;
   occurredOn: string;
+  recurringTemplateId: string | null;
   signedAmountMinor: Generated<number | null>;
   transferDirection: string | null;
   transferId: string | null;
@@ -104,8 +179,12 @@ export interface Wallets {
 }
 
 export interface DB {
+  auditLogs: AuditLogs;
+  budgets: Budgets;
   categories: Categories;
   passwordResetTokens: PasswordResetTokens;
+  recurringRuns: RecurringRuns;
+  recurringTemplates: RecurringTemplates;
   sessions: Sessions;
   transactions: Transactions;
   transfers: Transfers;

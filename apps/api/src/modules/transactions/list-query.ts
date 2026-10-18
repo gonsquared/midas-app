@@ -4,20 +4,32 @@ import type { DbHandle } from '../../platform/db/client.js';
 import { decodeCursor, encodeCursor, type CursorKey } from './cursor.js';
 import { escapeLike, selectTransactionRows, type TransactionRow } from './repository.js';
 
-/**
- * Builds the list query (AP-07). Every predicate is bound as a parameter. The sort columns end
- * in (created_at, id), the unique tiebreak that makes keyset pages stable. The cursor predicate
- * is a row-value comparison so the planner can walk ix_transactions__user_date or
- * ix_transactions__user_amount directly (database design 7.8).
- */
-export function buildListQuery(
-  db: DbHandle,
-  userId: string,
-  query: ListTransactionsQuery,
-  after: CursorKey | null,
-) {
-  let q = selectTransactionRows(db, userId);
+/** The filters and sort shared by the list and the CSV export. */
+export type TransactionFilters = Pick<
+  ListTransactionsQuery,
+  | 'from'
+  | 'to'
+  | 'walletId'
+  | 'categoryId'
+  | 'type'
+  | 'q'
+  | 'minAmountMinor'
+  | 'maxAmountMinor'
+  | 'sort'
+>;
 
+function orderingOf(sort: TransactionFilters['sort']) {
+  const byAmount = sort === 'amount_desc' || sort === 'amount_asc';
+  const descending = sort === 'date_desc' || sort === 'amount_desc';
+  return {
+    byAmount,
+    descending,
+    primary: byAmount ? sql.ref('t.amount_minor') : sql.ref('t.occurred_on'),
+  };
+}
+
+/** Every predicate is bound as a parameter; `q` has its LIKE metacharacters escaped. */
+function applyFilters(q: ReturnType<typeof selectTransactionRows>, query: TransactionFilters) {
   if (query.from !== undefined) q = q.where('t.occurredOn', '>=', query.from);
   if (query.to !== undefined) q = q.where('t.occurredOn', '<=', query.to);
   if (query.walletId) q = q.where('t.walletId', 'in', query.walletId);
@@ -28,10 +40,36 @@ export function buildListQuery(
   }
   if (query.minAmountMinor !== undefined) q = q.where('t.amountMinor', '>=', query.minAmountMinor);
   if (query.maxAmountMinor !== undefined) q = q.where('t.amountMinor', '<=', query.maxAmountMinor);
+  return q;
+}
 
-  const byAmount = query.sort === 'amount_desc' || query.sort === 'amount_asc';
-  const descending = query.sort === 'date_desc' || query.sort === 'amount_desc';
-  const primary = byAmount ? sql.ref('t.amount_minor') : sql.ref('t.occurred_on');
+/**
+ * The list query without paging, ordered like the list (sort, created_at, id). The CSV export
+ * streams it through a server-side cursor instead of paging (AP-08).
+ */
+export function buildExportQuery(db: DbHandle, userId: string, query: TransactionFilters) {
+  const { primary, descending } = orderingOf(query.sort);
+  const direction = descending ? 'desc' : 'asc';
+  return applyFilters(selectTransactionRows(db, userId), query)
+    .orderBy(primary, direction)
+    .orderBy('t.createdAt', direction)
+    .orderBy('t.id', direction);
+}
+
+/**
+ * Builds the list query (AP-07). The sort columns end in (created_at, id), the unique tiebreak
+ * that makes keyset pages stable. The cursor predicate is a row-value comparison so the planner
+ * can walk ix_transactions__user_date or ix_transactions__user_amount directly (database
+ * design 7.8).
+ */
+export function buildListQuery(
+  db: DbHandle,
+  userId: string,
+  query: ListTransactionsQuery,
+  after: CursorKey | null,
+) {
+  let q = applyFilters(selectTransactionRows(db, userId), query);
+  const { byAmount, descending, primary } = orderingOf(query.sort);
 
   if (after) {
     const cast = byAmount ? sql`::bigint` : sql`::date`;

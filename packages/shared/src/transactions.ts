@@ -63,42 +63,62 @@ export type UpdateTransactionRequest = z.infer<typeof UpdateTransactionRequestSc
 
 export const TransactionIdParamsSchema = z.strictObject({ transactionId: z.uuid() });
 
+const transactionFilterShape = {
+  from: LocalDateSchema.optional(),
+  to: LocalDateSchema.optional(),
+  walletId: repeatable(z.uuid()).optional(),
+  categoryId: repeatable(z.uuid()).optional(),
+  type: repeatable(TransactionTypeSchema, 3).optional(),
+  q: z.string().trim().min(1).max(100).optional(),
+  minAmountMinor: integerQuery.pipe(AmountMinorSchema).optional(),
+  maxAmountMinor: integerQuery.pipe(AmountMinorSchema).optional(),
+  sort: TransactionSortSchema.default('date_desc'),
+};
+
+interface FilterRangeContext {
+  value: {
+    from?: string | undefined;
+    to?: string | undefined;
+    minAmountMinor?: number | undefined;
+    maxAmountMinor?: number | undefined;
+  };
+  issues: Array<z.core.$ZodRawIssue>;
+}
+
+/** Cross-field rules shared by the list and the export query. */
+function checkFilterRanges(ctx: FilterRangeContext): void {
+  const { from, to, minAmountMinor, maxAmountMinor } = ctx.value;
+  if (from !== undefined && to !== undefined && to < from) {
+    ctx.issues.push({
+      code: 'custom',
+      input: to,
+      path: ['to'],
+      message: '`to` must not be before `from`.',
+      params: { code: 'INVALID_RANGE' },
+    });
+  }
+  if (
+    minAmountMinor !== undefined &&
+    maxAmountMinor !== undefined &&
+    maxAmountMinor < minAmountMinor
+  ) {
+    ctx.issues.push({
+      code: 'custom',
+      input: maxAmountMinor,
+      path: ['maxAmountMinor'],
+      message: '`maxAmountMinor` must not be less than `minAmountMinor`.',
+      params: { code: 'INVALID_RANGE' },
+    });
+  }
+}
+
 export const ListTransactionsQuerySchema = z
-  .strictObject({
-    from: LocalDateSchema.optional(),
-    to: LocalDateSchema.optional(),
-    walletId: repeatable(z.uuid()).optional(),
-    categoryId: repeatable(z.uuid()).optional(),
-    type: repeatable(TransactionTypeSchema, 3).optional(),
-    q: z.string().trim().min(1).max(100).optional(),
-    minAmountMinor: integerQuery.pipe(AmountMinorSchema).optional(),
-    maxAmountMinor: integerQuery.pipe(AmountMinorSchema).optional(),
-    sort: TransactionSortSchema.default('date_desc'),
-    ...CursorQueryShape,
-  })
-  .check((ctx) => {
-    const { from, to, minAmountMinor, maxAmountMinor } = ctx.value;
-    if (from !== undefined && to !== undefined && to < from) {
-      ctx.issues.push({
-        code: 'custom',
-        input: to,
-        path: ['to'],
-        message: '`to` must not be before `from`.',
-        params: { code: 'INVALID_RANGE' },
-      });
-    }
-    if (
-      minAmountMinor !== undefined &&
-      maxAmountMinor !== undefined &&
-      maxAmountMinor < minAmountMinor
-    ) {
-      ctx.issues.push({
-        code: 'custom',
-        input: maxAmountMinor,
-        path: ['maxAmountMinor'],
-        message: '`maxAmountMinor` must not be less than `minAmountMinor`.',
-        params: { code: 'INVALID_RANGE' },
-      });
-    }
-  });
+  .strictObject({ ...transactionFilterShape, ...CursorQueryShape })
+  .check((ctx) => checkFilterRanges(ctx));
 export type ListTransactionsQuery = z.infer<typeof ListTransactionsQuerySchema>;
+
+/** CSV export: the list filters and sort, without pagination (api-contract 8). */
+export const ExportTransactionsQuerySchema = z
+  .strictObject(transactionFilterShape)
+  .check((ctx) => checkFilterRanges(ctx));
+export type ExportTransactionsQuery = z.infer<typeof ExportTransactionsQuerySchema>;

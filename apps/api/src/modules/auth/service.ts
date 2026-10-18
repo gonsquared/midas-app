@@ -2,6 +2,7 @@ import { isIP } from 'node:net';
 import type { AuthSession, LoginRequest, Preferences, RegisterRequest, Role } from '@midas/shared';
 import { v7 as uuidv7 } from 'uuid';
 import type { Clock } from '../../platform/clock.js';
+import { noopAuditRecorder, type AuditRecorder } from '../audit/service.js';
 import { isUniqueViolation } from '../../platform/db/errors.js';
 import { AppError } from '../../platform/errors.js';
 import type { PasswordHasher } from './password-hasher.js';
@@ -23,6 +24,7 @@ const MAX_REFRESH_ATTEMPTS = 3;
 export interface RequestContext {
   ip: string | null;
   userAgent: string | null;
+  requestId?: string | null;
 }
 
 export interface SessionResult {
@@ -59,6 +61,8 @@ export interface AuthServiceDeps {
   refreshTokenTtlDays: number;
   sessionAbsoluteTtlDays: number;
   logger?: SecurityLogger;
+  /** Best-effort audit trail for auth events (database design C-07). Defaults to a no-op. */
+  audit?: AuditRecorder;
 }
 
 export function toUserDto(user: UserRecord): AuthSession['user'] {
@@ -89,9 +93,11 @@ function sessionInvalid(): AppError {
 export class AuthService {
   private dummyHash: Promise<string> | undefined;
   private readonly logger: SecurityLogger;
+  private readonly audit: AuditRecorder;
 
   constructor(private readonly deps: AuthServiceDeps) {
     this.logger = deps.logger ?? noopLogger;
+    this.audit = deps.audit ?? noopAuditRecorder;
   }
 
   /**
@@ -147,6 +153,13 @@ export class AuthService {
       throw error;
     }
 
+    await this.audit.record({
+      actorUserId: user.id,
+      action: 'auth.registered',
+      targetType: 'user',
+      targetId: user.id,
+      context,
+    });
     return this.buildResult(user, sessionId, refresh.token, refreshTokenTtlDays * 86_400, now);
   }
 
@@ -164,6 +177,16 @@ export class AuthService {
     const passwordOk = await hasher.verify(hashToCheck, input.password);
     if (!found || !passwordOk) {
       this.logger.info({ event: 'auth.login_failed' }, 'login failed');
+      // A known account is named by id; an unknown email is stored only as an HMAC pseudonym.
+      const pseudonym = found ? undefined : this.audit.pseudonymize(input.email);
+      await this.audit.record({
+        actorUserId: found?.id ?? null,
+        action: 'auth.login_failed',
+        targetType: found ? 'user' : 'system',
+        targetId: found?.id ?? null,
+        ...(pseudonym !== undefined && { metadata: { emailHmac: pseudonym } }),
+        context,
+      });
       throw new AppError('INVALID_CREDENTIALS', 'The email or password is incorrect.');
     }
     if (found.status === 'suspended') {
@@ -171,6 +194,13 @@ export class AuthService {
         { event: 'auth.login_blocked_suspended', userId: found.id },
         'login blocked',
       );
+      await this.audit.record({
+        actorUserId: found.id,
+        action: 'auth.login_blocked_suspended',
+        targetType: 'user',
+        targetId: found.id,
+        context,
+      });
       throw new AppError('ACCOUNT_SUSPENDED', 'This account has been suspended.');
     }
 
@@ -190,6 +220,13 @@ export class AuthService {
     });
 
     this.logger.info({ event: 'auth.login_succeeded', userId: found.id, sessionId }, 'login ok');
+    await this.audit.record({
+      actorUserId: found.id,
+      action: 'auth.login_succeeded',
+      targetType: 'session',
+      targetId: sessionId,
+      context,
+    });
     const { passwordHash: _omit, ...user } = found;
     return this.buildResult(user, sessionId, refresh.token, refreshTokenTtlDays * 86_400, now);
   }
@@ -225,7 +262,7 @@ export class AuthService {
    * token older than the immediately previous one (no hash match any more) still revokes the
    * session it names. Malformed tokens are rejected without touching the database.
    */
-  async refresh(presentedToken: string): Promise<SessionResult> {
+  async refresh(presentedToken: string, context?: RequestContext): Promise<SessionResult> {
     const { clock, unitOfWork, refreshTokenTtlDays, sessionAbsoluteTtlDays } = this.deps;
     const now = clock.now();
     const parsed = parseRefreshToken(presentedToken);
@@ -233,7 +270,9 @@ export class AuthService {
     const presented = hashRefreshToken(presentedToken);
     const graceStart = new Date(now.getTime() - REFRESH_GRACE_MS);
 
+    let reuse: { userId: string; sessionId: string } | null = null;
     const outcome = await unitOfWork(async ({ sessions, users }) => {
+      reuse = null;
       for (let attempt = 0; attempt < MAX_REFRESH_ATTEMPTS; attempt++) {
         const found = await sessions.findByRefreshHash(presented);
         if (!found || found.id !== parsed.sessionId) {
@@ -246,6 +285,7 @@ export class AuthService {
               { event: 'auth.session_reuse_detected', userId: named.userId, sessionId: named.id },
               'refresh token reuse detected, session revoked',
             );
+            reuse = { userId: named.userId, sessionId: named.id };
           }
           return null;
         }
@@ -280,6 +320,7 @@ export class AuthService {
               { event: 'auth.session_reuse_detected', userId: found.userId, sessionId: found.id },
               'refresh token reuse detected, session revoked',
             );
+            reuse = { userId: found.userId, sessionId: found.id };
             return null;
           }
           rotated = await sessions.rotateWithinGrace({ ...base, graceStart });
@@ -299,6 +340,16 @@ export class AuthService {
       return null;
     });
 
+    const reused = reuse as { userId: string; sessionId: string } | null;
+    if (reused) {
+      await this.audit.record({
+        actorUserId: reused.userId,
+        action: 'auth.session_reuse_detected',
+        targetType: 'session',
+        targetId: reused.sessionId,
+        ...(context && { context }),
+      });
+    }
     if (!outcome) throw sessionInvalid();
     return this.buildResult(
       outcome.user,
@@ -310,22 +361,44 @@ export class AuthService {
   }
 
   /** Revokes the session named by an access token and/or a refresh cookie. Idempotent. */
-  async logout(input: {
-    sessionId?: string | undefined;
-    refreshToken?: string | undefined;
-  }): Promise<void> {
+  async logout(
+    input: {
+      sessionId?: string | undefined;
+      /** Owner of `sessionId`, for the audit trail. */
+      userId?: string | undefined;
+      refreshToken?: string | undefined;
+    },
+    context?: RequestContext,
+  ): Promise<void> {
     const now = this.deps.clock.now();
+    const ended: Array<{ userId: string | null; sessionId: string }> = [];
     await this.deps.unitOfWork(async ({ sessions }) => {
+      ended.length = 0;
       let revoked = false;
       if (input.sessionId !== undefined) {
-        revoked = (await sessions.revoke(input.sessionId, 'logout', now)) || revoked;
+        const done = await sessions.revoke(input.sessionId, 'logout', now);
+        if (done) ended.push({ userId: input.userId ?? null, sessionId: input.sessionId });
+        revoked = done || revoked;
       }
       if (input.refreshToken !== undefined && parseRefreshToken(input.refreshToken)) {
         const found = await sessions.findByRefreshHash(hashRefreshToken(input.refreshToken));
-        if (found) revoked = (await sessions.revoke(found.id, 'logout', now)) || revoked;
+        if (found) {
+          const done = await sessions.revoke(found.id, 'logout', now);
+          if (done) ended.push({ userId: found.userId, sessionId: found.id });
+          revoked = done || revoked;
+        }
       }
       if (revoked) this.logger.info({ event: 'auth.logout' }, 'session revoked on logout');
     });
+    for (const session of ended) {
+      await this.audit.record({
+        actorUserId: session.userId,
+        action: 'auth.logout',
+        targetType: 'session',
+        targetId: session.sessionId,
+        ...(context && { context }),
+      });
+    }
   }
 
   /**

@@ -21,6 +21,7 @@ export interface TransactionRow {
   note: string | null;
   transferId: string | null;
   transferDirection: TransferDirection | null;
+  recurringTemplateId: string | null;
   counterpartId: string | null;
   counterpartAmountMinor: number | null;
   counterpartWalletId: string | null;
@@ -83,6 +84,7 @@ export function selectTransactionRows(db: DbHandle, userId: string) {
       't.note',
       't.transferId',
       't.transferDirection',
+      't.recurringTemplateId',
       'o.id as counterpartId',
       'o.amountMinor as counterpartAmountMinor',
       'o.walletId as counterpartWalletId',

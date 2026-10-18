@@ -931,6 +931,8 @@ describeDb('ledger schema: wallets, categories, transfers, transactions (real Po
       expect(rows.map((r) => r.indexname)).toEqual([
         'ix_transactions__category_user_date',
         'ix_transactions__created_at_brin',
+        // Added by the create-recurring migration (E8-F1-S1), FK support for template delete.
+        'ix_transactions__recurring_template',
         'ix_transactions__user_amount',
         'ix_transactions__user_date',
         'ix_transactions__user_note_trgm',

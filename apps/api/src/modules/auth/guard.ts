@@ -56,6 +56,17 @@ export function requireAuth(request: FastifyRequest): AuthContext {
 }
 
 /**
+ * onRequest hook for the admin scope, registered after the authentication guard. The role comes
+ * from the database row loaded for this request (never from the token), so a demotion or
+ * suspension takes effect on the next call. Services re-check what they change under lock.
+ */
+export async function requireAdminGuard(request: FastifyRequest): Promise<void> {
+  if (requireAuth(request).role !== 'admin') {
+    throw new AppError('FORBIDDEN', 'You do not have permission to perform this action.');
+  }
+}
+
+/**
  * Cookie-authenticated endpoints are CSRF-prone, so beyond SameSite=Strict they require the app
  * Origin and a custom header that a cross-site form cannot set (architecture 9).
  */

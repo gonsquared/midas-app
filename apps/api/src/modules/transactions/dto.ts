@@ -75,8 +75,7 @@ export function toTransactionDto(row: TransactionRow): Transaction {
     occurredOn: row.occurredOn,
     note: row.note,
     transfer,
-    // Linked to recurring templates once the recurring tables exist (E8-F1-S1).
-    recurringTemplateId: null,
+    recurringTemplateId: row.recurringTemplateId,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

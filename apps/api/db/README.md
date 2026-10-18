@@ -50,6 +50,26 @@ pnpm --filter @midas/api seed:system             # idempotent system categories 
 | 3   | `20261017090000000_create-wallets`                     | E3-F1-S1 |
 | 4   | `20261017090100000_create-categories`                  | E4-F1-S1 |
 | 5   | `20261017090200000_create-transfers-and-transactions`  | E5-F1-S1 |
+| 6   | `20261018090000000_create-budgets`                     | E6-F1-S1 |
+| 7   | `20261018090100000_create-recurring`                   | E8-F1-S1 |
+| 8   | `20261018090200000_create-audit-logs`                  | E9-F1-S1 |
+
+Migration 7 also expands `transactions` with the nullable `recurring_template_id` link (its foreign
+key, check and partial index), the expand pattern of section 11.4. Migrations 7 and 8 grant
+`midas_maintenance` `SELECT, DELETE` on `recurring_runs` and `audit_logs` (retention purge), and
+migration 8 revokes `UPDATE, DELETE, TRUNCATE` on `audit_logs` from `midas_app`. Both only act when
+the role exists. The roles template needs no change: `midas_maintenance` is already created there.
+
+## How Sprint 3 uses these tables
+
+No migration was added for Sprint 3: the API only reads and writes the tables above.
+
+- **Advisory locks** (`apps/api/src/platform/db/locks.ts`, database design 9.3): `(1, 0)` admin set, `(4, user)` budget cap, `(5, user)` template cap, `(10, 0)` daily housekeeping (try-lock).
+- **Recurring generation** (`modules/recurring/generator.ts`): per occurrence one transaction locking the wallet, then the template with `FOR UPDATE SKIP LOCKED`, then a `SAVEPOINT` around the ledger insert and the guarded run upsert (`uq_recurring_runs__template_occurrence`). Lock order is wallet, then template, which is also the order wallet archiving and template edits use.
+- **Audit rows** are written through `modules/audit`, which has no update or delete path. Admin actions pass their transaction handle, so the audit row commits with the change; auth events are separate best-effort inserts.
+- **CSV export** streams `transactions` through a `READ ONLY` transaction and a server-side cursor (`pg-cursor`, batches of 500). `createKysely` passes the cursor implementation to the Kysely dialect for this.
+- **Deleting a template** clears `transactions.recurring_template_id` through the foreign key action, which fires the `updated_at` trigger: the linked transactions get a new `updatedAt` (documented, accepted).
+- **Retention jobs not implemented yet:** the 400-day purge of `audit_logs` and `recurring_runs` (`cli db:purge-audit`) is future work. Daily housekeeping already removes old sessions and reset tokens.
 
 Integration tests that exercise constraints and triggers need PostgreSQL 17 (Testcontainers or
 `TEST_DATABASE_URL`). PGlite is PostgreSQL 18 and differs: `ON DELETE RESTRICT` reports SQLSTATE 23001

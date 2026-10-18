@@ -35,7 +35,12 @@ export function userRoutes(app: FastifyInstance, options: UserRoutesOptions): vo
     await passwordChangeLimiter(request, reply);
     const parsed = ChangePasswordRequestSchema.safeParse(request.body);
     if (!parsed.success) throw validationError(parsed.error);
-    await passwords.changePassword(requireAuth(request), parsed.data);
+    await passwords.changePassword(requireAuth(request), parsed.data, {
+      ip: request.ip,
+      userAgent:
+        typeof request.headers['user-agent'] === 'string' ? request.headers['user-agent'] : null,
+      requestId: request.serverRequestId,
+    });
     return reply.code(204).send();
   });
 }

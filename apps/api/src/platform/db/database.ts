@@ -1,5 +1,13 @@
 import type {
+  AuditAction,
+  AuditTargetType,
+  BudgetPeriod,
+  BudgetScope,
   CategoryType,
+  RecurringFrequency,
+  RecurringRunStatus,
+  RecurringStatus,
+  RecurringType,
   Role,
   Theme,
   TransactionType,
@@ -7,11 +15,16 @@ import type {
   UserStatus,
   WalletType,
 } from '@midas/shared';
-import type { ColumnType } from 'kysely';
+import type { ColumnType, InsertType, SelectType } from 'kysely';
 import type {
+  AuditLogs as GeneratedAuditLogs,
+  Budgets as GeneratedBudgets,
   Categories as GeneratedCategories,
   DB,
   Generated,
+  JsonObject,
+  RecurringRuns as GeneratedRecurringRuns,
+  RecurringTemplates as GeneratedRecurringTemplates,
   Timestamp,
   Transactions as GeneratedTransactions,
   Users as GeneratedUsers,
@@ -65,9 +78,60 @@ export interface TransactionsTable extends Omit<
   signedAmountMinor: DatabaseMaintained<number>;
 }
 
-export interface Database extends Omit<DB, 'users' | 'wallets' | 'categories' | 'transactions'> {
+export interface BudgetsTable extends Omit<GeneratedBudgets, 'scope' | 'period'> {
+  scope: BudgetScope;
+  /** Defaults to `monthly`. `startDate` must already be the period start (ck_budgets__start_date_aligned). */
+  period: Generated<BudgetPeriod>;
+}
+
+export interface RecurringTemplatesTable extends Omit<
+  GeneratedRecurringTemplates,
+  'type' | 'frequency' | 'status'
+> {
+  type: RecurringType;
+  frequency: RecurringFrequency;
+  status: Generated<RecurringStatus>;
+}
+
+export interface RecurringRunsTable extends Omit<GeneratedRecurringRuns, 'status'> {
+  status: RecurringRunStatus;
+}
+
+/** Every column is insert-only: the application never updates audit rows (C-10). */
+type AppendOnly<T> = { [K in keyof T]: ColumnType<SelectType<T[K]>, InsertType<T[K]>, never> };
+
+/**
+ * `audit_logs` is append-only (C-10): midas_app has SELECT and INSERT only, and
+ * `tg_audit_logs__immutable` rejects updates and non-maintenance deletes. The type makes every
+ * column non-updatable; the audit repository must not expose update or delete methods.
+ */
+export type AuditLogsTable = AppendOnly<
+  Omit<GeneratedAuditLogs, 'action' | 'targetType' | 'metadata'> & {
+    /** Format-checked by ck_audit_logs__action; the list itself is validated by the service. */
+    action: AuditAction;
+    targetType: AuditTargetType;
+    /** Always a JSON object of at most 4 KB (ck_audit_logs__metadata). Never secrets or amounts. */
+    metadata: Generated<JsonObject>;
+  }
+>;
+
+export interface Database extends Omit<
+  DB,
+  | 'users'
+  | 'wallets'
+  | 'categories'
+  | 'transactions'
+  | 'budgets'
+  | 'recurringTemplates'
+  | 'recurringRuns'
+  | 'auditLogs'
+> {
   users: UsersTable;
   wallets: WalletsTable;
   categories: CategoriesTable;
   transactions: TransactionsTable;
+  budgets: BudgetsTable;
+  recurringTemplates: RecurringTemplatesTable;
+  recurringRuns: RecurringRunsTable;
+  auditLogs: AuditLogsTable;
 }

@@ -68,6 +68,8 @@ const EnvSchema = z.object({
   RATE_LIMIT_USER_WRITE_MAX: positiveInt(120), // authenticated writes, per user, per minute
   RATE_LIMIT_USER_READ_MAX: positiveInt(600), // authenticated reads, per user, per minute
   RATE_LIMIT_GLOBAL_IP_MAX: positiveInt(1200), // all /api requests, per IP, per minute
+  RATE_LIMIT_EXPORT_MAX: positiveInt(10), // CSV exports, per user, per minute
+  EXPORT_MAX_DURATION_SECONDS: positiveInt(300), // absolute cap per CSV export
   // Capacity of each limiter's private in-memory store (LRU, one store per limiter).
   RATE_LIMIT_STORE_MAX_KEYS: positiveInt(DEFAULT_RATE_LIMIT_MAX_KEYS, 1_000_000),
 
@@ -81,6 +83,25 @@ const EnvSchema = z.object({
   SMTP_SECURE: z.preprocess(emptyToUndefined, booleanFlag.default(false)),
   SMTP_USER: optional(z.string().max(254)),
   SMTP_PASSWORD: optional(z.string().max(1024)),
+
+  // Recurring scheduler (ADR-011).
+  SCHEDULER_ENABLED: z.preprocess(emptyToUndefined, booleanFlag.default(true)),
+  SCHEDULER_INTERVAL_SECONDS: positiveInt(300, 86_400),
+  RECURRING_MAX_CATCHUP: positiveInt(31, 366),
+  RECURRING_MAX_FAILURES: positiveInt(5, 100),
+
+  // Bearer token for GET /metrics; the endpoint is disabled (404) when unset.
+  METRICS_TOKEN: optional(
+    z
+      .string()
+      .min(32, 'must be at least 32 characters')
+      .max(256)
+      .regex(/^[A-Za-z0-9._~+/=-]+$/, 'may contain only letters, digits and ._~+/=-'),
+  ),
+  // Pseudonymises emails of failed logins in the audit log (database design 10.3).
+  AUDIT_HMAC_SECRET: optional(z.string().min(32, 'must be at least 32 characters').max(256)),
+  // One-time fallback to promote an existing user when no admin exists (ADR-013).
+  BOOTSTRAP_ADMIN_EMAIL: optional(z.string().trim().toLowerCase().max(254).pipe(z.email())),
 
   // Comma-separated browser origins allowed in development; ignored in production (same origin).
   CORS_ORIGINS: z.preprocess(emptyToUndefined, z.string().max(2048).optional()),
@@ -112,6 +133,8 @@ function parseOrigins(raw: string | undefined): { origins: string[]; invalid: bo
 }
 
 export interface Config {
+  /** Absolute time cap per CSV export. */
+  exportMaxDurationSeconds: number;
   env: (typeof NODE_ENVS)[number];
   host: string;
   port: number;
@@ -150,6 +173,7 @@ export interface Config {
     userWriteMax: number;
     userReadMax: number;
     globalIpMax: number;
+    exportMax: number;
     maxKeys: number;
   };
   mail: {
@@ -164,6 +188,17 @@ export interface Config {
     };
   };
   cors: { origins: string[] };
+  scheduler: {
+    enabled: boolean;
+    intervalSeconds: number;
+    recurringMaxCatchup: number;
+    recurringMaxFailures: number;
+  };
+  /** Bearer token for GET /metrics. Undefined disables the endpoint. */
+  metricsToken: string | undefined;
+  audit: { hmacSecret: string | undefined };
+  /** Promote this existing user once, only while no admin exists (ADR-013). */
+  bootstrapAdminEmail: string | undefined;
 }
 
 export class ConfigError extends Error {
@@ -205,6 +240,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       problems.push('APP_BASE_URL: must use https in production');
     }
   }
+  for (const [name, value] of [
+    ['METRICS_TOKEN', e.METRICS_TOKEN],
+    ['AUDIT_HMAC_SECRET', e.AUDIT_HMAC_SECRET],
+  ] as const) {
+    if (value !== undefined && e.NODE_ENV !== 'test' && /change-?me/i.test(value)) {
+      problems.push(`${name}: placeholder value is not allowed outside NODE_ENV=test`);
+    }
+  }
   const mailTransport = e.MAIL_TRANSPORT ?? (e.NODE_ENV === 'test' ? 'memory' : 'smtp');
   if (e.NODE_ENV === 'production' && mailTransport !== 'smtp') {
     problems.push('MAIL_TRANSPORT: must be "smtp" in production');
@@ -221,6 +264,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (e.NODE_ENV === 'production' && cors.origins.length > 0) {
     warnings.push('CORS_ORIGINS is ignored in production (the SPA is served from the API origin)');
   }
+  if (e.NODE_ENV === 'production' && e.AUDIT_HMAC_SECRET === undefined) {
+    warnings.push(
+      'AUDIT_HMAC_SECRET is not set: failed logins for unknown emails are audited without a pseudonym',
+    );
+  }
   if (e.DATABASE_SSL === 'require') {
     warnings.push(
       'DATABASE_SSL=require encrypts the connection but does not verify the server certificate; use verify-full',
@@ -228,6 +276,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   }
 
   return {
+    exportMaxDurationSeconds: e.EXPORT_MAX_DURATION_SECONDS,
     warnings,
     env: e.NODE_ENV,
     host: e.HOST,
@@ -265,6 +314,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       userWriteMax: e.RATE_LIMIT_USER_WRITE_MAX,
       userReadMax: e.RATE_LIMIT_USER_READ_MAX,
       globalIpMax: e.RATE_LIMIT_GLOBAL_IP_MAX,
+      exportMax: e.RATE_LIMIT_EXPORT_MAX,
       maxKeys: e.RATE_LIMIT_STORE_MAX_KEYS,
     },
     mail: {
@@ -279,6 +329,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       },
     },
     cors: { origins: e.NODE_ENV === 'production' ? [] : cors.origins },
+    scheduler: {
+      enabled: e.SCHEDULER_ENABLED,
+      intervalSeconds: e.SCHEDULER_INTERVAL_SECONDS,
+      recurringMaxCatchup: e.RECURRING_MAX_CATCHUP,
+      recurringMaxFailures: e.RECURRING_MAX_FAILURES,
+    },
+    metricsToken: e.METRICS_TOKEN,
+    audit: { hmacSecret: e.AUDIT_HMAC_SECRET },
+    bootstrapAdminEmail: e.BOOTSTRAP_ADMIN_EMAIL,
   };
 }
 
