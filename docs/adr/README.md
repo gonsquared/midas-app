@@ -1,7 +1,7 @@
 # Architecture decision records
 
-One file per decision. The decision log in `docs/architecture.md` section 14 is the
-original source; these files are the versioned, individually linkable copies. Add new decisions
+One file per decision. These files are the versioned, individually linkable record; each
+notes the planning-document section it was first written in. Add new decisions
 here, starting from [template.md](./template.md), and number them in order.
 
 | ADR | Decision | Status |
