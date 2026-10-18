@@ -1,0 +1,2773 @@
+openapi: 3.1.0
+info:
+  title: Midas API
+  version: 1.0.0
+  summary: Personal finance tracking API.
+  description: |
+    OpenAPI 3.1 description of the Midas API contract v1 (`docs/api-contract.md`).
+
+    Conventions:
+    - Money is always an integer in minor units (for example cents) paired with an ISO 4217 currency code. Never a float.
+    - Bodies are `application/json` with camelCase fields. Request schemas are strict: unknown fields are rejected with `400 VALIDATION_FAILED`.
+    - `PATCH` is partial. Omitted fields are unchanged and `null` clears a nullable field.
+    - Errors are RFC 9457 Problem Details (`application/problem+json`). Every operation can also return 400 VALIDATION_FAILED, 429 RATE_LIMITED and 500 INTERNAL_ERROR; authenticated operations can also return 401 UNAUTHENTICATED.
+    - A resource owned by another user is reported as 404 NOT_FOUND.
+
+    Each operation carries `x-implementation-status` (`implemented` or `planned`) describing the state of the server code.
+servers:
+  - url: /
+    description: Same origin as the web app.
+tags:
+  - name: Ops
+  - name: Auth
+  - name: Profile
+  - name: Wallets
+  - name: Categories
+  - name: Transactions
+  - name: Transfers
+  - name: Budgets
+  - name: Reports
+  - name: Recurring templates
+  - name: Admin users
+  - name: Admin categories
+  - name: Admin metrics and audit
+security:
+  - bearerAuth: []
+
+paths:
+  /health:
+    get:
+      tags: [Ops]
+      operationId: getHealth
+      summary: Readiness probe
+      x-implementation-status: implemented
+      security: []
+      responses:
+        '200':
+          description: Healthy.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+        '503':
+          description: A dependency is down (`checks.database = down`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+
+  /metrics:
+    get:
+      tags: [Ops]
+      operationId: getMetrics
+      summary: Prometheus metrics
+      description: 'Requires `Authorization: Bearer <METRICS_TOKEN>`. Returns 404 when `METRICS_TOKEN` is unset.'
+      x-implementation-status: planned
+      security:
+        - metricsToken: []
+      responses:
+        '200':
+          description: Prometheus text exposition.
+          content:
+            'text/plain; version=0.0.4':
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/auth/register:
+    post:
+      tags: [Auth]
+      operationId: register
+      summary: Register an account
+      description: Rate limited. New users get preference `theme = system` and system categories are immediately available.
+      x-implementation-status: implemented
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: Account created. Sets the `midas_rt` refresh cookie.
+          headers:
+            Set-Cookie: { $ref: '#/components/headers/SetRefreshCookie' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthSession' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: EMAIL_TAKEN (with `errors[0].field = "email"`).
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Sign in
+      description: Rate limited. The same response is returned for an unknown email and a wrong password.
+      x-implementation-status: implemented
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Signed in. Sets the `midas_rt` refresh cookie.
+          headers:
+            Set-Cookie: { $ref: '#/components/headers/SetRefreshCookie' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthSession' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          description: INVALID_CREDENTIALS.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: ACCOUNT_SUSPENDED (only after the password is verified).
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Auth]
+      operationId: refreshSession
+      summary: Rotate the refresh token and issue a new access token
+      description: Requires the `midas_rt` cookie, an `Origin` matching the app origin and `X-CSRF-Protection`.
+      x-implementation-status: implemented
+      security:
+        - refreshCookie: []
+      parameters:
+        - { $ref: '#/components/parameters/CsrfHeader' }
+      responses:
+        '200':
+          description: Session refreshed. Sets a rotated `midas_rt` cookie.
+          headers:
+            Set-Cookie: { $ref: '#/components/headers/SetRefreshCookie' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthSession' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          description: SESSION_INVALID (missing, expired, revoked or reused token, or suspended user). The cookie is cleared.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: FORBIDDEN (Origin or CSRF header check failed).
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: Sign out
+      description: Idempotent. Accepts the refresh cookie, or a bearer token.
+      x-implementation-status: implemented
+      security:
+        - refreshCookie: []
+        - bearerAuth: []
+      parameters:
+        - { $ref: '#/components/parameters/CsrfHeader' }
+      responses:
+        '204':
+          description: Session revoked and cookie cleared (also when the session is already gone).
+          headers:
+            Set-Cookie: { $ref: '#/components/headers/SetRefreshCookie' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: FORBIDDEN (Origin or CSRF header check failed).
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/auth/password/forgot:
+    post:
+      tags: [Auth]
+      operationId: forgotPassword
+      summary: Request a password reset email
+      description: Rate limited. The response is identical for known and unknown emails.
+      x-implementation-status: implemented
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ForgotPasswordRequest' }
+      responses:
+        '202':
+          description: Accepted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, const: accepted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/auth/password/reset/verify:
+    post:
+      tags: [Auth]
+      operationId: verifyPasswordResetToken
+      summary: Check that a reset token is valid without consuming it
+      description: Rate limited.
+      x-implementation-status: implemented
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasswordResetTokenRequest' }
+      responses:
+        '204':
+          description: The token is currently valid.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+          description: RESET_TOKEN_INVALID (unknown, expired or already used) or VALIDATION_FAILED.
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/auth/password/reset:
+    post:
+      tags: [Auth]
+      operationId: resetPassword
+      summary: Set a new password using a reset token
+      description: Rate limited. Consumes the token and revokes all sessions.
+      x-implementation-status: implemented
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResetPasswordRequest' }
+      responses:
+        '204':
+          description: Password updated. The user must sign in again.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+          description: RESET_TOKEN_INVALID, or VALIDATION_FAILED (field code WEAK_PASSWORD).
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/me:
+    get:
+      tags: [Profile]
+      operationId: getMe
+      summary: Get the current user
+      x-implementation-status: implemented
+      responses:
+        '200':
+          description: The current user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    patch:
+      tags: [Profile]
+      operationId: updateMe
+      summary: Update display name or preferences
+      description: Email change is not supported in v1.
+      x-implementation-status: implemented
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateProfileRequest' }
+      responses:
+        '200':
+          description: The updated user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/me/password:
+    post:
+      tags: [Profile]
+      operationId: changePassword
+      summary: Change the password
+      description: All other sessions are revoked; the current session stays.
+      x-implementation-status: implemented
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangePasswordRequest' }
+      responses:
+        '204':
+          description: Password changed.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+          description: INVALID_CURRENT_PASSWORD, or VALIDATION_FAILED (field codes WEAK_PASSWORD, SAME_AS_CURRENT).
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/wallets:
+    get:
+      tags: [Wallets]
+      operationId: listWallets
+      summary: List wallets
+      x-implementation-status: implemented
+      parameters:
+        - name: includeArchived
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Wallets sorted by name (at most 100).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Wallet' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      tags: [Wallets]
+      operationId: createWallet
+      summary: Create a wallet
+      x-implementation-status: implemented
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateWalletRequest' }
+      responses:
+        '201':
+          description: The created wallet.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Wallet' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: WALLET_NAME_TAKEN or LIMIT_REACHED.
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/wallets/{walletId}:
+    parameters:
+      - { $ref: '#/components/parameters/WalletId' }
+    get:
+      tags: [Wallets]
+      operationId: getWallet
+      summary: Get a wallet
+      x-implementation-status: implemented
+      responses:
+        '200':
+          description: The wallet.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Wallet' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    patch:
+      tags: [Wallets]
+      operationId: updateWallet
+      summary: Update a wallet
+      x-implementation-status: implemented
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateWalletRequest' }
+      responses:
+        '200':
+          description: The updated wallet.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Wallet' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: WALLET_NAME_TAKEN, WALLET_ARCHIVED or WALLET_CURRENCY_LOCKED.
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      tags: [Wallets]
+      operationId: deleteWallet
+      summary: Delete a wallet
+      x-implementation-status: implemented
+      responses:
+        '204':
+          description: Deleted.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: WALLET_IN_USE (has transactions or recurring templates; archive it instead).
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/wallets/{walletId}/archive:
+    parameters:
+      - { $ref: '#/components/parameters/WalletId' }
+    post:
+      tags: [Wallets]
+      operationId: archiveWallet
+      summary: Archive a wallet
+      description: Idempotent. Active recurring templates on this wallet are paused.
+      x-implementation-status: implemented
+      responses:
+        '200':
+          description: The archived wallet.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Wallet' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/wallets/{walletId}/unarchive:
+    parameters:
+      - { $ref: '#/components/parameters/WalletId' }
+    post:
+      tags: [Wallets]
+      operationId: unarchiveWallet
+      summary: Unarchive a wallet
+      description: Idempotent. Recurring templates stay paused.
+      x-implementation-status: implemented
+      responses:
+        '200':
+          description: The active wallet.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Wallet' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: WALLET_NAME_TAKEN (an active wallet now uses the name).
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/categories:
+    get:
+      tags: [Categories]
+      operationId: listCategories
+      summary: List system and own categories
+      x-implementation-status: implemented
+      parameters:
+        - name: type
+          in: query
+          schema: { $ref: '#/components/schemas/CategoryType' }
+        - name: includeRetired
+          in: query
+          description: When true, retired system categories are included.
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Categories sorted by type, then name.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Category' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      tags: [Categories]
+      operationId: createCategory
+      summary: Create a user category
+      x-implementation-status: implemented
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateCategoryRequest' }
+      responses:
+        '201':
+          description: The created category (`system = false`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Category' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: CATEGORY_NAME_TAKEN or LIMIT_REACHED (200).
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/categories/{categoryId}:
+    parameters:
+      - { $ref: '#/components/parameters/CategoryId' }
+    patch:
+      tags: [Categories]
+      operationId: updateCategory
+      summary: Update a user category
+      description: '`type` cannot be changed.'
+      x-implementation-status: implemented
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateCategoryRequest' }
+      responses:
+        '200':
+          description: The updated category.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Category' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: SYSTEM_CATEGORY_READ_ONLY.
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: CATEGORY_NAME_TAKEN.
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      tags: [Categories]
+      operationId: deleteCategory
+      summary: Delete a user category, optionally reassigning its usage
+      x-implementation-status: implemented
+      parameters:
+        - name: reassignTo
+          in: query
+          description: Required when the category is used by transactions or recurring templates. Must be an accessible, non-retired category of the same type, other than the one being deleted.
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Deletion summary.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeleteCategoryResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: SYSTEM_CATEGORY_READ_ONLY.
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: CATEGORY_IN_USE (in use and no `reassignTo`).
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+          description: REASSIGN_TARGET_INVALID.
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/transactions:
+    get:
+      tags: [Transactions]
+      operationId: listTransactions
+      summary: List transactions (cursor pagination)
+      description: Each transfer leg appears as its own row in its wallet. A cursor is bound to its sort and filters.
+      x-implementation-status: implemented
+      parameters:
+        - { $ref: '#/components/parameters/TxFrom' }
+        - { $ref: '#/components/parameters/TxTo' }
+        - { $ref: '#/components/parameters/TxWalletId' }
+        - { $ref: '#/components/parameters/TxCategoryId' }
+        - { $ref: '#/components/parameters/TxType' }
+        - { $ref: '#/components/parameters/TxSearch' }
+        - { $ref: '#/components/parameters/TxMinAmount' }
+        - { $ref: '#/components/parameters/TxMaxAmount' }
+        - { $ref: '#/components/parameters/TxSort' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: A page of transactions.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransactionPage' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+          description: INVALID_CURSOR, or VALIDATION_FAILED (range inverted).
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      tags: [Transactions]
+      operationId: createTransaction
+      summary: Create an income or expense transaction
+      description: Use `/api/v1/transfers` for transfers.
+      x-implementation-status: implemented
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTransactionRequest' }
+      responses:
+        '201':
+          description: The created transaction.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transaction' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: WALLET_ARCHIVED.
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+          description: INVALID_REFERENCE (wallet or category not found or not accessible), CATEGORY_TYPE_MISMATCH or CATEGORY_RETIRED.
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/transactions/export:
+    get:
+      tags: [Transactions]
+      operationId: exportTransactions
+      summary: Export transactions as CSV
+      description: |
+        Rate limited (10/min). Same filters as the list endpoint except `limit` and `cursor`. Streamed UTF-8 CSV with a BOM and the header row
+        `date,type,direction,wallet,currency,amount,category,note,counterpart_wallet,transaction_id,transfer_id,recurring_template_id`.
+        `amount` is a signed decimal in major units. Text cells beginning with `=`, `+`, `-`, `@`, tab or carriage return are prefixed with a single quote.
+      x-implementation-status: planned
+      parameters:
+        - { $ref: '#/components/parameters/TxFrom' }
+        - { $ref: '#/components/parameters/TxTo' }
+        - { $ref: '#/components/parameters/TxWalletId' }
+        - { $ref: '#/components/parameters/TxCategoryId' }
+        - { $ref: '#/components/parameters/TxType' }
+        - { $ref: '#/components/parameters/TxSearch' }
+        - { $ref: '#/components/parameters/TxMinAmount' }
+        - { $ref: '#/components/parameters/TxMaxAmount' }
+        - { $ref: '#/components/parameters/TxSort' }
+      responses:
+        '200':
+          description: CSV file.
+          headers:
+            Content-Disposition:
+              description: 'attachment; filename="midas-transactions-YYYYMMDD.csv"'
+              schema: { type: string }
+          content:
+            'text/csv; charset=utf-8':
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/transactions/{transactionId}:
+    parameters:
+      - { $ref: '#/components/parameters/TransactionId' }
+    get:
+      tags: [Transactions]
+      operationId: getTransaction
+      summary: Get a transaction
+      x-implementation-status: implemented
+      responses:
+        '200':
+          description: The transaction.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transaction' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    patch:
+      tags: [Transactions]
+      operationId: updateTransaction
+      summary: Update a transaction
+      description: Affected wallet balances update atomically.
+      x-implementation-status: implemented
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateTransactionRequest' }
+      responses:
+        '200':
+          description: The updated transaction.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transaction' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: TRANSFER_LEG_IMMUTABLE (use `/api/v1/transfers/{transferId}`) or WALLET_ARCHIVED (source or target wallet).
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+          description: INVALID_REFERENCE, CATEGORY_TYPE_MISMATCH or CATEGORY_RETIRED (only when changing to a retired category).
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      tags: [Transactions]
+      operationId: deleteTransaction
+      summary: Delete a transaction
+      x-implementation-status: implemented
+      responses:
+        '204':
+          description: Deleted.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: TRANSFER_LEG_IMMUTABLE or WALLET_ARCHIVED.
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/transfers:
+    post:
+      tags: [Transfers]
+      operationId: createTransfer
+      summary: Create a transfer between two wallets
+      description: Two linked transactions are created atomically.
+      x-implementation-status: implemented
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTransferRequest' }
+      responses:
+        '201':
+          description: The created transfer.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transfer' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: WALLET_ARCHIVED.
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+          description: INVALID_REFERENCE, SAME_WALLET_TRANSFER, TO_AMOUNT_REQUIRED or TO_AMOUNT_MISMATCH.
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/transfers/{transferId}:
+    parameters:
+      - { $ref: '#/components/parameters/TransferId' }
+    get:
+      tags: [Transfers]
+      operationId: getTransfer
+      summary: Get a transfer
+      x-implementation-status: implemented
+      responses:
+        '200':
+          description: The transfer.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transfer' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    patch:
+      tags: [Transfers]
+      operationId: updateTransfer
+      summary: Update a transfer
+      description: Both legs are updated atomically. The `toAmountMinor` rules are evaluated on the resulting state.
+      x-implementation-status: implemented
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateTransferRequest' }
+      responses:
+        '200':
+          description: The updated transfer.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transfer' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: WALLET_ARCHIVED.
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+          description: INVALID_REFERENCE, SAME_WALLET_TRANSFER, TO_AMOUNT_REQUIRED or TO_AMOUNT_MISMATCH.
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      tags: [Transfers]
+      operationId: deleteTransfer
+      summary: Delete a transfer
+      x-implementation-status: implemented
+      responses:
+        '204':
+          description: Both legs deleted atomically.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: WALLET_ARCHIVED.
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/budgets:
+    get:
+      tags: [Budgets]
+      operationId: listBudgets
+      summary: List budgets with status for a period
+      x-implementation-status: planned
+      parameters:
+        - { $ref: '#/components/parameters/BudgetDate' }
+      responses:
+        '200':
+          description: Budgets whose startDate is at or before the end of the requested period (at most 200).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [date, items]
+                properties:
+                  date: { $ref: '#/components/schemas/LocalDate' }
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Budget' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      tags: [Budgets]
+      operationId: createBudget
+      summary: Create a budget
+      x-implementation-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateBudgetRequest' }
+      responses:
+        '201':
+          description: The created budget, with status for the current period.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Budget' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: BUDGET_EXISTS (same scope, category, period and currency) or LIMIT_REACHED.
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+          description: INVALID_REFERENCE, CATEGORY_TYPE_MISMATCH (income category) or CATEGORY_RETIRED.
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/budgets/{budgetId}:
+    parameters:
+      - { $ref: '#/components/parameters/BudgetId' }
+    get:
+      tags: [Budgets]
+      operationId: getBudget
+      summary: Get a budget
+      x-implementation-status: planned
+      parameters:
+        - { $ref: '#/components/parameters/BudgetDate' }
+      responses:
+        '200':
+          description: The budget.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Budget' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    patch:
+      tags: [Budgets]
+      operationId: updateBudget
+      summary: Update a budget
+      description: Scope, category, period and currency cannot be changed; delete the budget and create a new one instead.
+      x-implementation-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateBudgetRequest' }
+      responses:
+        '200':
+          description: The updated budget.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Budget' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      tags: [Budgets]
+      operationId: deleteBudget
+      summary: Delete a budget
+      x-implementation-status: planned
+      responses:
+        '204':
+          description: Deleted.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/reports/summary:
+    get:
+      tags: [Reports]
+      operationId: getReportSummary
+      summary: Dashboard summary
+      description: Income and expense totals exclude transfers. The default range is the current calendar month in the user's timezone.
+      x-implementation-status: planned
+      parameters:
+        - name: from
+          in: query
+          schema: { $ref: '#/components/schemas/LocalDate' }
+        - name: to
+          in: query
+          description: Range must be at most 1830 days.
+          schema: { $ref: '#/components/schemas/LocalDate' }
+      responses:
+        '200':
+          description: Summary for the range.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportSummary' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+          description: RANGE_TOO_LARGE, or VALIDATION_FAILED.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/reports/trend:
+    get:
+      tags: [Reports]
+      operationId: getReportTrend
+      summary: Income and expense trend
+      description: Income and expense totals exclude transfers.
+      x-implementation-status: planned
+      parameters:
+        - name: from
+          in: query
+          schema: { $ref: '#/components/schemas/LocalDate' }
+        - name: to
+          in: query
+          schema: { $ref: '#/components/schemas/LocalDate' }
+        - name: groupBy
+          in: query
+          description: Default is `day` if the range is at most 31 days, `week` if at most 182 days, otherwise `month`.
+          schema: { $ref: '#/components/schemas/TrendGroupBy' }
+        - name: currency
+          in: query
+          description: Defaults to the preference currency.
+          schema: { $ref: '#/components/schemas/CurrencyCode' }
+      responses:
+        '200':
+          description: Trend buckets.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportTrend' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+          description: RANGE_TOO_LARGE (more than 400 buckets), or VALIDATION_FAILED.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/reports/category-breakdown:
+    get:
+      tags: [Reports]
+      operationId: getReportCategoryBreakdown
+      summary: Spending or income by category
+      description: Income and expense totals exclude transfers.
+      x-implementation-status: planned
+      parameters:
+        - name: from
+          in: query
+          schema: { $ref: '#/components/schemas/LocalDate' }
+        - name: to
+          in: query
+          schema: { $ref: '#/components/schemas/LocalDate' }
+        - name: type
+          in: query
+          schema:
+            allOf:
+              - { $ref: '#/components/schemas/CategoryType' }
+            default: expense
+        - name: currency
+          in: query
+          description: Defaults to the preference currency.
+          schema: { $ref: '#/components/schemas/CurrencyCode' }
+        - name: top
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 20, default: 8 }
+      responses:
+        '200':
+          description: Category breakdown.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportCategoryBreakdown' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+          description: RANGE_TOO_LARGE (range over 1830 days), or VALIDATION_FAILED.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/recurring-templates:
+    get:
+      tags: [Recurring templates]
+      operationId: listRecurringTemplates
+      summary: List recurring templates
+      x-implementation-status: planned
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/RecurringStatus' }
+      responses:
+        '200':
+          description: Templates sorted by nextRunOn, nulls last (at most 200).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/RecurringTemplate' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      tags: [Recurring templates]
+      operationId: createRecurringTemplate
+      summary: Create a recurring template
+      x-implementation-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateRecurringTemplateRequest' }
+      responses:
+        '201':
+          description: The created template (status `active`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecurringTemplate' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: WALLET_ARCHIVED or LIMIT_REACHED.
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+          description: INVALID_REFERENCE, CATEGORY_TYPE_MISMATCH or CATEGORY_RETIRED.
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/recurring-templates/preview:
+    post:
+      tags: [Recurring templates]
+      operationId: previewRecurringTemplate
+      summary: Compute occurrence dates without saving
+      description: Must be registered before `/recurring-templates/{templateId}`.
+      x-implementation-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PreviewRecurringRequest' }
+      responses:
+        '200':
+          description: Upcoming occurrence dates.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [dates]
+                properties:
+                  dates:
+                    type: array
+                    items: { $ref: '#/components/schemas/LocalDate' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/recurring-templates/{templateId}:
+    parameters:
+      - { $ref: '#/components/parameters/TemplateId' }
+    get:
+      tags: [Recurring templates]
+      operationId: getRecurringTemplate
+      summary: Get a recurring template
+      x-implementation-status: planned
+      responses:
+        '200':
+          description: The template.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecurringTemplate' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    patch:
+      tags: [Recurring templates]
+      operationId: updateRecurringTemplate
+      summary: Update a recurring template
+      description: '`type` cannot be changed. Changes affect future occurrences only. If any schedule field changes, `nextRunOn` is recomputed as the first occurrence on or after today.'
+      x-implementation-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateRecurringTemplateRequest' }
+      responses:
+        '200':
+          description: The updated template.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecurringTemplate' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: TEMPLATE_ENDED or WALLET_ARCHIVED.
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+          description: INVALID_REFERENCE, CATEGORY_TYPE_MISMATCH or CATEGORY_RETIRED.
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      tags: [Recurring templates]
+      operationId: deleteRecurringTemplate
+      summary: Delete a recurring template
+      description: Generated transactions are kept, with `recurringTemplateId` set to null.
+      x-implementation-status: planned
+      responses:
+        '204':
+          description: Deleted.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/recurring-templates/{templateId}/pause:
+    parameters:
+      - { $ref: '#/components/parameters/TemplateId' }
+    post:
+      tags: [Recurring templates]
+      operationId: pauseRecurringTemplate
+      summary: Pause a recurring template
+      description: Idempotent.
+      x-implementation-status: planned
+      responses:
+        '200':
+          description: The paused template.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecurringTemplate' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: TEMPLATE_ENDED.
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/recurring-templates/{templateId}/resume:
+    parameters:
+      - { $ref: '#/components/parameters/TemplateId' }
+    post:
+      tags: [Recurring templates]
+      operationId: resumeRecurringTemplate
+      summary: Resume a recurring template
+      description: Idempotent. `nextRunOn` becomes the first occurrence on or after today (no backfill of the paused period) and `consecutiveFailures` is reset to 0.
+      x-implementation-status: planned
+      responses:
+        '200':
+          description: The active template.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecurringTemplate' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: TEMPLATE_ENDED or WALLET_ARCHIVED.
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+          description: CATEGORY_RETIRED.
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/recurring-templates/{templateId}/runs:
+    parameters:
+      - { $ref: '#/components/parameters/TemplateId' }
+    get:
+      tags: [Recurring templates]
+      operationId: listRecurringTemplateRuns
+      summary: List runs of a recurring template (newest occurrence first)
+      x-implementation-status: planned
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: A page of runs.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecurringRunPage' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+          description: INVALID_CURSOR, or VALIDATION_FAILED.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/admin/users:
+    get:
+      tags: [Admin users]
+      operationId: adminListUsers
+      summary: List users (offset pagination)
+      description: Admin only. Returns no per-user financial data.
+      x-implementation-status: planned
+      parameters:
+        - name: q
+          in: query
+          description: Case-insensitive substring of email or displayName.
+          schema: { type: string, minLength: 1, maxLength: 100 }
+        - name: role
+          in: query
+          schema: { $ref: '#/components/schemas/Role' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/UserStatus' }
+        - name: sort
+          in: query
+          schema: { $ref: '#/components/schemas/AdminUserSort' }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/PageSize' }
+      responses:
+        '200':
+          description: A page of users.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminUserPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/admin/users/{userId}:
+    parameters:
+      - { $ref: '#/components/parameters/UserId' }
+    get:
+      tags: [Admin users]
+      operationId: adminGetUser
+      summary: Get a user
+      x-implementation-status: planned
+      responses:
+        '200':
+          description: The user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminUserDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/admin/users/{userId}/suspend:
+    parameters:
+      - { $ref: '#/components/parameters/UserId' }
+    post:
+      tags: [Admin users]
+      operationId: adminSuspendUser
+      summary: Suspend a user
+      description: Revokes all of the user's sessions and is audited (`admin.user_suspended`). Idempotent; no new audit entry if already suspended.
+      x-implementation-status: planned
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SuspendUserRequest' }
+      responses:
+        '200':
+          description: The suspended user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminUserDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: CANNOT_MODIFY_SELF or LAST_ADMIN.
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/admin/users/{userId}/reactivate:
+    parameters:
+      - { $ref: '#/components/parameters/UserId' }
+    post:
+      tags: [Admin users]
+      operationId: adminReactivateUser
+      summary: Reactivate a user
+      description: Audited (`admin.user_reactivated`). Idempotent.
+      x-implementation-status: planned
+      responses:
+        '200':
+          description: The reactivated user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminUserDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: CANNOT_MODIFY_SELF.
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/admin/users/{userId}/role:
+    parameters:
+      - { $ref: '#/components/parameters/UserId' }
+    patch:
+      tags: [Admin users]
+      operationId: adminChangeUserRole
+      summary: Change a user's role
+      description: Audited (`admin.user_role_changed`, metadata `{ from, to }`). Takes effect on the target's next request.
+      x-implementation-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangeRoleRequest' }
+      responses:
+        '200':
+          description: The updated user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminUserDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: CANNOT_MODIFY_SELF or LAST_ADMIN.
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/admin/categories:
+    get:
+      tags: [Admin categories]
+      operationId: adminListCategories
+      summary: List system categories
+      x-implementation-status: planned
+      parameters:
+        - name: type
+          in: query
+          schema: { $ref: '#/components/schemas/CategoryType' }
+        - name: includeRetired
+          in: query
+          schema: { type: boolean, default: true }
+      responses:
+        '200':
+          description: System categories only.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Category' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      tags: [Admin categories]
+      operationId: adminCreateCategory
+      summary: Create a system category
+      description: Audited (`admin.category_created`).
+      x-implementation-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateCategoryRequest' }
+      responses:
+        '201':
+          description: The created category (`system = true`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Category' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: CATEGORY_NAME_TAKEN (among system categories of the same type).
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/admin/categories/{categoryId}:
+    parameters:
+      - { $ref: '#/components/parameters/CategoryId' }
+    patch:
+      tags: [Admin categories]
+      operationId: adminUpdateCategory
+      summary: Update a system category
+      description: Audited (`admin.category_updated`, metadata lists the changed field names).
+      x-implementation-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateCategoryRequest' }
+      responses:
+        '200':
+          description: The updated category.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Category' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+          description: NOT_FOUND (also for user-owned categories).
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: CATEGORY_NAME_TAKEN.
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/admin/categories/{categoryId}/retire:
+    parameters:
+      - { $ref: '#/components/parameters/CategoryId' }
+    post:
+      tags: [Admin categories]
+      operationId: adminRetireCategory
+      summary: Retire a system category
+      description: It stays on existing transactions, budgets and templates and cannot be selected for new ones. Audited. Idempotent.
+      x-implementation-status: planned
+      responses:
+        '200':
+          description: The retired category.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Category' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/admin/categories/{categoryId}/restore:
+    parameters:
+      - { $ref: '#/components/parameters/CategoryId' }
+    post:
+      tags: [Admin categories]
+      operationId: adminRestoreCategory
+      summary: Restore a retired system category
+      description: Audited. Idempotent.
+      x-implementation-status: planned
+      responses:
+        '200':
+          description: The restored category.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Category' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: CATEGORY_NAME_TAKEN.
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/admin/metrics:
+    get:
+      tags: [Admin metrics and audit]
+      operationId: adminGetMetrics
+      summary: Platform metrics
+      description: Cached for up to 5 minutes; see `generatedAt`.
+      x-implementation-status: planned
+      responses:
+        '200':
+          description: Platform metrics.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformMetrics' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/admin/audit-logs:
+    get:
+      tags: [Admin metrics and audit]
+      operationId: adminListAuditLogs
+      summary: List audit log entries (newest first, cursor pagination)
+      description: There are no endpoints for creating, updating or deleting audit entries.
+      x-implementation-status: planned
+      parameters:
+        - name: actorId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: actorEmail
+          in: query
+          description: Exact match, case-insensitive.
+          schema: { type: string }
+        - name: action
+          in: query
+          description: Repeatable.
+          style: form
+          explode: true
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/AuditAction' }
+        - name: targetType
+          in: query
+          schema: { $ref: '#/components/schemas/AuditTargetType' }
+        - name: targetId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: from
+          in: query
+          description: UTC day, inclusive.
+          schema: { $ref: '#/components/schemas/LocalDate' }
+        - name: to
+          in: query
+          description: UTC day, inclusive.
+          schema: { $ref: '#/components/schemas/LocalDate' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: A page of audit entries.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditLogPage' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+          description: INVALID_CURSOR, or VALIDATION_FAILED.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 'User: valid access token, user status `active`. Admin operations additionally require the current role `admin` (read from the database on every request).'
+    refreshCookie:
+      type: apiKey
+      in: cookie
+      name: midas_rt
+      description: Refresh token cookie. Also requires an `Origin` matching the app origin and the header `X-CSRF-Protection` set to 1.
+    metricsToken:
+      type: http
+      scheme: bearer
+      description: The static `METRICS_TOKEN`.
+
+  headers:
+    SetRefreshCookie:
+      description: '`midas_rt=...; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth; Max-Age=2592000`. Cleared on logout and on a failed refresh.'
+      schema: { type: string }
+    RetryAfter:
+      description: Seconds to wait before retrying.
+      schema: { type: integer, minimum: 1 }
+
+  parameters:
+    CsrfHeader:
+      name: X-CSRF-Protection
+      in: header
+      required: true
+      schema: { type: string, const: '1' }
+    WalletId:
+      name: walletId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    CategoryId:
+      name: categoryId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    TransactionId:
+      name: transactionId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    TransferId:
+      name: transferId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    BudgetId:
+      name: budgetId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    TemplateId:
+      name: templateId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Limit:
+      name: limit
+      in: query
+      description: Page size for cursor pagination.
+      schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque cursor from a previous response, bound to its sort and filters. An invalid or mismatched cursor returns 400 INVALID_CURSOR.
+      schema: { type: string }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: pageSize
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+    BudgetDate:
+      name: date
+      in: query
+      description: Status is computed for the period containing this date. Defaults to today in the user's timezone.
+      schema: { $ref: '#/components/schemas/LocalDate' }
+    TxFrom:
+      name: from
+      in: query
+      schema: { $ref: '#/components/schemas/LocalDate' }
+    TxTo:
+      name: to
+      in: query
+      description: Must be on or after `from`.
+      schema: { $ref: '#/components/schemas/LocalDate' }
+    TxWalletId:
+      name: walletId
+      in: query
+      description: Repeatable.
+      style: form
+      explode: true
+      schema:
+        type: array
+        items: { type: string, format: uuid }
+    TxCategoryId:
+      name: categoryId
+      in: query
+      description: Repeatable.
+      style: form
+      explode: true
+      schema:
+        type: array
+        items: { type: string, format: uuid }
+    TxType:
+      name: type
+      in: query
+      description: Repeatable.
+      style: form
+      explode: true
+      schema:
+        type: array
+        items: { $ref: '#/components/schemas/TransactionType' }
+    TxSearch:
+      name: q
+      in: query
+      description: Case-insensitive substring of the note.
+      schema: { type: string, minLength: 1, maxLength: 100 }
+    TxMinAmount:
+      name: minAmountMinor
+      in: query
+      schema: { $ref: '#/components/schemas/AmountMinor' }
+    TxMaxAmount:
+      name: maxAmountMinor
+      in: query
+      description: Must be at least `minAmountMinor`.
+      schema: { $ref: '#/components/schemas/AmountMinor' }
+    TxSort:
+      name: sort
+      in: query
+      description: Ties are broken by createdAt, then id.
+      schema: { $ref: '#/components/schemas/TransactionSort' }
+
+  responses:
+    BadRequest:
+      description: 400. VALIDATION_FAILED (also malformed JSON) and other client errors such as INVALID_CURSOR.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Unauthorized:
+      description: 401. UNAUTHENTICATED (missing, invalid or expired access token).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Forbidden:
+      description: 403. Authenticated but not permitted (FORBIDDEN, for example a non-admin on an admin route).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: 404 NOT_FOUND. The resource does not exist or is owned by another user.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Conflict:
+      description: 409. State conflict.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Unprocessable:
+      description: 422. Semantic business-rule violation.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    TooManyRequests:
+      description: 429 RATE_LIMITED.
+      headers:
+        Retry-After: { $ref: '#/components/headers/RetryAfter' }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    InternalError:
+      description: 500 INTERNAL_ERROR. No internals are leaked.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    # ---- Scalars -------------------------------------------------------
+    Uuid: { type: string, format: uuid }
+    LocalDate:
+      type: string
+      format: date
+      description: Calendar date `YYYY-MM-DD`, valid range 1900-01-01 to 2100-12-31.
+      examples: ['2026-10-16']
+    Timestamp:
+      type: string
+      format: date-time
+      description: ISO 8601 UTC.
+      examples: ['2026-10-16T08:30:00.000Z']
+    CurrencyCode:
+      type: string
+      pattern: '^[A-Z]{3}$'
+      description: 3 uppercase letters from `SUPPORTED_CURRENCIES` (shared package).
+      examples: [USD]
+    Locale:
+      type: string
+      description: BCP 47 tag from `SUPPORTED_LOCALES` (shared package).
+      examples: [en-US]
+    TimeZone:
+      type: string
+      description: IANA zone name.
+      examples: [Europe/Berlin]
+    AmountMinor:
+      type: integer
+      minimum: 1
+      maximum: 100000000000000
+      description: Positive amount in integer minor units of the associated currency.
+    SignedAmountMinor:
+      type: integer
+      minimum: -100000000000000
+      maximum: 100000000000000
+      description: Signed amount in integer minor units of the associated currency.
+    IconKey:
+      type: string
+      description: A key from `CATEGORY_ICONS` (shared package).
+    ColorToken:
+      type: string
+      description: A palette key from `CATEGORY_COLORS` (shared package).
+    Email:
+      type: string
+      format: email
+      maxLength: 254
+    NewPassword:
+      type: string
+      minLength: 12
+      maxLength: 128
+      description: Must reach zxcvbn score 3 or higher.
+    Note:
+      type: [string, 'null']
+      maxLength: 500
+
+    # ---- Enums ---------------------------------------------------------
+    Role: { type: string, enum: [user, admin] }
+    UserStatus: { type: string, enum: [active, suspended] }
+    Theme: { type: string, enum: [light, dark, system] }
+    WalletType: { type: string, enum: [cash, bank, card, savings] }
+    CategoryType: { type: string, enum: [income, expense] }
+    TransactionType: { type: string, enum: [income, expense, transfer] }
+    TransferDirection: { type: string, enum: [out, in] }
+    TransactionSort:
+      type: string
+      enum: [date_desc, date_asc, amount_desc, amount_asc]
+      default: date_desc
+    BudgetScope: { type: string, enum: [overall, category] }
+    BudgetPeriod:
+      type: string
+      enum: [weekly, monthly, yearly]
+      default: monthly
+    BudgetState: { type: string, enum: [ok, warning, exceeded] }
+    RecurringType: { type: string, enum: [income, expense] }
+    RecurringFrequency: { type: string, enum: [daily, weekly, monthly, yearly] }
+    RecurringStatus: { type: string, enum: [active, paused, ended] }
+    RecurringRunStatus: { type: string, enum: [succeeded, failed, skipped] }
+    TrendGroupBy: { type: string, enum: [day, week, month] }
+    AdminUserSort:
+      type: string
+      enum: [createdAt_desc, createdAt_asc, email_asc, lastLoginAt_desc]
+      default: createdAt_desc
+    AuditTargetType: { type: string, enum: [user, session, category, system] }
+    AuditAction:
+      type: string
+      enum:
+        - auth.registered
+        - auth.login_succeeded
+        - auth.login_failed
+        - auth.login_blocked_suspended
+        - auth.logout
+        - auth.session_reuse_detected
+        - auth.password_reset_requested
+        - auth.password_reset_completed
+        - user.password_changed
+        - admin.user_suspended
+        - admin.user_reactivated
+        - admin.user_role_changed
+        - admin.category_created
+        - admin.category_updated
+        - admin.category_retired
+        - admin.category_restored
+        - system.admin_bootstrapped
+
+    # ---- Errors --------------------------------------------------------
+    FieldError:
+      type: object
+      required: [field, code, message]
+      properties:
+        field: { type: string, description: 'Dot path, for example `preferences.currency`.' }
+        code:
+          {
+            type: string,
+            description: 'For example REQUIRED, TOO_SHORT, WEAK_PASSWORD, INVALID_FORMAT, EMAIL_TAKEN.',
+          }
+        message: { type: string }
+    Problem:
+      type: object
+      description: RFC 9457 Problem Details.
+      required: [type, title, status, detail, instance, code, requestId]
+      properties:
+        type:
+          {
+            type: string,
+            format: uri-reference,
+            examples: ['https://midas.app/problems/validation-failed'],
+          }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string, description: Request path. }
+        code:
+          type: string
+          description: Error catalogue code, for example VALIDATION_FAILED, NOT_FOUND, WALLET_NAME_TAKEN, RATE_LIMITED, INTERNAL_ERROR.
+        requestId: { type: string }
+        errors:
+          type: array
+          items: { $ref: '#/components/schemas/FieldError' }
+
+    # ---- Core models ---------------------------------------------------
+    Preferences:
+      type: object
+      required: [currency, locale, timezone, theme]
+      properties:
+        currency: { $ref: '#/components/schemas/CurrencyCode' }
+        locale: { $ref: '#/components/schemas/Locale' }
+        timezone: { $ref: '#/components/schemas/TimeZone' }
+        theme: { $ref: '#/components/schemas/Theme' }
+    User:
+      type: object
+      required: [id, email, displayName, role, status, preferences, createdAt, updatedAt]
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        email: { type: string }
+        displayName: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        status: { $ref: '#/components/schemas/UserStatus' }
+        preferences: { $ref: '#/components/schemas/Preferences' }
+        createdAt: { $ref: '#/components/schemas/Timestamp' }
+        updatedAt: { $ref: '#/components/schemas/Timestamp' }
+    AuthSession:
+      type: object
+      required: [accessToken, accessTokenExpiresAt, user]
+      properties:
+        accessToken: { type: string, description: JWT access token. }
+        accessTokenExpiresAt: { $ref: '#/components/schemas/Timestamp' }
+        user: { $ref: '#/components/schemas/User' }
+    WalletRef:
+      type: object
+      required: [id, name, currency, archived]
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string }
+        currency: { $ref: '#/components/schemas/CurrencyCode' }
+        archived: { type: boolean }
+    Wallet:
+      type: object
+      required:
+        [
+          id,
+          name,
+          type,
+          currency,
+          openingBalanceMinor,
+          balanceMinor,
+          archived,
+          archivedAt,
+          hasTransactions,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string, minLength: 1, maxLength: 60 }
+        type: { $ref: '#/components/schemas/WalletType' }
+        currency: { $ref: '#/components/schemas/CurrencyCode' }
+        openingBalanceMinor: { $ref: '#/components/schemas/SignedAmountMinor' }
+        balanceMinor:
+          allOf:
+            - { $ref: '#/components/schemas/SignedAmountMinor' }
+          description: Opening balance + income - expense - transfers out + transfers in.
+        archived: { type: boolean }
+        archivedAt:
+          oneOf:
+            - { $ref: '#/components/schemas/Timestamp' }
+            - { type: 'null' }
+        hasTransactions: { type: boolean }
+        createdAt: { $ref: '#/components/schemas/Timestamp' }
+        updatedAt: { $ref: '#/components/schemas/Timestamp' }
+    CategoryRef:
+      type: object
+      required: [id, name, type, icon, color, system, retired]
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string }
+        type: { $ref: '#/components/schemas/CategoryType' }
+        icon: { $ref: '#/components/schemas/IconKey' }
+        color: { $ref: '#/components/schemas/ColorToken' }
+        system: { type: boolean }
+        retired: { type: boolean }
+    Category:
+      type: object
+      required: [id, name, type, icon, color, system, retired, createdAt, updatedAt]
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string, minLength: 1, maxLength: 40 }
+        type: { $ref: '#/components/schemas/CategoryType' }
+        icon: { $ref: '#/components/schemas/IconKey' }
+        color: { $ref: '#/components/schemas/ColorToken' }
+        system: { type: boolean }
+        retired: { type: boolean, description: Always false for user categories. }
+        createdAt: { $ref: '#/components/schemas/Timestamp' }
+        updatedAt: { $ref: '#/components/schemas/Timestamp' }
+    TransferLeg:
+      type: object
+      required:
+        [transferId, direction, counterpartTransactionId, counterpartWallet, counterpartAmountMinor]
+      properties:
+        transferId: { $ref: '#/components/schemas/Uuid' }
+        direction: { $ref: '#/components/schemas/TransferDirection' }
+        counterpartTransactionId: { $ref: '#/components/schemas/Uuid' }
+        counterpartWallet: { $ref: '#/components/schemas/WalletRef' }
+        counterpartAmountMinor: { $ref: '#/components/schemas/AmountMinor' }
+    Transaction:
+      type: object
+      required:
+        [
+          id,
+          type,
+          wallet,
+          category,
+          amountMinor,
+          currency,
+          occurredOn,
+          note,
+          transfer,
+          recurringTemplateId,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        type: { $ref: '#/components/schemas/TransactionType' }
+        wallet: { $ref: '#/components/schemas/WalletRef' }
+        category:
+          description: Null if and only if type is `transfer`.
+          oneOf:
+            - { $ref: '#/components/schemas/CategoryRef' }
+            - { type: 'null' }
+        amountMinor: { $ref: '#/components/schemas/AmountMinor' }
+        currency:
+          allOf:
+            - { $ref: '#/components/schemas/CurrencyCode' }
+          description: Equals the wallet currency.
+        occurredOn: { $ref: '#/components/schemas/LocalDate' }
+        note: { $ref: '#/components/schemas/Note' }
+        transfer:
+          description: Non-null if and only if type is `transfer`.
+          oneOf:
+            - { $ref: '#/components/schemas/TransferLeg' }
+            - { type: 'null' }
+        recurringTemplateId:
+          oneOf:
+            - { $ref: '#/components/schemas/Uuid' }
+            - { type: 'null' }
+        createdAt: { $ref: '#/components/schemas/Timestamp' }
+        updatedAt: { $ref: '#/components/schemas/Timestamp' }
+    Transfer:
+      type: object
+      required:
+        [
+          id,
+          fromWallet,
+          toWallet,
+          amountMinor,
+          toAmountMinor,
+          occurredOn,
+          note,
+          outTransactionId,
+          inTransactionId,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        fromWallet: { $ref: '#/components/schemas/WalletRef' }
+        toWallet: { $ref: '#/components/schemas/WalletRef' }
+        amountMinor:
+          allOf:
+            - { $ref: '#/components/schemas/AmountMinor' }
+          description: Debited from fromWallet, in its currency.
+        toAmountMinor:
+          allOf:
+            - { $ref: '#/components/schemas/AmountMinor' }
+          description: Credited to toWallet, in its currency.
+        occurredOn: { $ref: '#/components/schemas/LocalDate' }
+        note: { $ref: '#/components/schemas/Note' }
+        outTransactionId: { $ref: '#/components/schemas/Uuid' }
+        inTransactionId: { $ref: '#/components/schemas/Uuid' }
+        createdAt: { $ref: '#/components/schemas/Timestamp' }
+        updatedAt: { $ref: '#/components/schemas/Timestamp' }
+    BudgetStatus:
+      type: object
+      required: [periodStart, periodEnd, spentMinor, remainingMinor, percentUsed, state]
+      properties:
+        periodStart: { $ref: '#/components/schemas/LocalDate' }
+        periodEnd: { $ref: '#/components/schemas/LocalDate' }
+        spentMinor: { type: integer, minimum: 0 }
+        remainingMinor:
+          allOf:
+            - { $ref: '#/components/schemas/SignedAmountMinor' }
+          description: Limit minus spent; negative when over.
+        percentUsed:
+          {
+            type: number,
+            description: 'spent / limit x 100, rounded to 1 decimal, may exceed 100.',
+          }
+        state: { $ref: '#/components/schemas/BudgetState' }
+    Budget:
+      type: object
+      required:
+        [
+          id,
+          scope,
+          category,
+          period,
+          amountMinor,
+          currency,
+          warningThresholdPct,
+          startDate,
+          status,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        scope: { $ref: '#/components/schemas/BudgetScope' }
+        category:
+          description: Null if and only if scope is `overall`.
+          oneOf:
+            - { $ref: '#/components/schemas/CategoryRef' }
+            - { type: 'null' }
+        period: { $ref: '#/components/schemas/BudgetPeriod' }
+        amountMinor:
+          allOf:
+            - { $ref: '#/components/schemas/AmountMinor' }
+          description: The limit.
+        currency: { $ref: '#/components/schemas/CurrencyCode' }
+        warningThresholdPct: { type: integer, minimum: 1, maximum: 99 }
+        startDate:
+          allOf:
+            - { $ref: '#/components/schemas/LocalDate' }
+          description: Normalized to the period start.
+        status:
+          description: Null if the requested period ends before startDate.
+          oneOf:
+            - { $ref: '#/components/schemas/BudgetStatus' }
+            - { type: 'null' }
+        createdAt: { $ref: '#/components/schemas/Timestamp' }
+        updatedAt: { $ref: '#/components/schemas/Timestamp' }
+    RecurringTemplate:
+      type: object
+      required:
+        [
+          id,
+          name,
+          type,
+          wallet,
+          category,
+          amountMinor,
+          currency,
+          note,
+          frequency,
+          interval,
+          startDate,
+          endDate,
+          nextRunOn,
+          status,
+          lastRunAt,
+          lastError,
+          consecutiveFailures,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string, minLength: 1, maxLength: 60 }
+        type: { $ref: '#/components/schemas/RecurringType' }
+        wallet: { $ref: '#/components/schemas/WalletRef' }
+        category: { $ref: '#/components/schemas/CategoryRef' }
+        amountMinor: { $ref: '#/components/schemas/AmountMinor' }
+        currency:
+          allOf:
+            - { $ref: '#/components/schemas/CurrencyCode' }
+          description: Wallet currency.
+        note: { $ref: '#/components/schemas/Note' }
+        frequency: { $ref: '#/components/schemas/RecurringFrequency' }
+        interval: { type: integer, minimum: 1, maximum: 99 }
+        startDate: { $ref: '#/components/schemas/LocalDate' }
+        endDate:
+          oneOf:
+            - { $ref: '#/components/schemas/LocalDate' }
+            - { type: 'null' }
+        nextRunOn:
+          description: Null when ended.
+          oneOf:
+            - { $ref: '#/components/schemas/LocalDate' }
+            - { type: 'null' }
+        status: { $ref: '#/components/schemas/RecurringStatus' }
+        lastRunAt:
+          oneOf:
+            - { $ref: '#/components/schemas/Timestamp' }
+            - { type: 'null' }
+        lastError:
+          description: Error code of the last failed run.
+          type: [string, 'null']
+        consecutiveFailures: { type: integer, minimum: 0 }
+        createdAt: { $ref: '#/components/schemas/Timestamp' }
+        updatedAt: { $ref: '#/components/schemas/Timestamp' }
+    RecurringRun:
+      type: object
+      required:
+        [
+          id,
+          templateId,
+          occurrenceDate,
+          status,
+          transactionId,
+          errorCode,
+          attempts,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        templateId: { $ref: '#/components/schemas/Uuid' }
+        occurrenceDate: { $ref: '#/components/schemas/LocalDate' }
+        status: { $ref: '#/components/schemas/RecurringRunStatus' }
+        transactionId:
+          oneOf:
+            - { $ref: '#/components/schemas/Uuid' }
+            - { type: 'null' }
+        errorCode: { type: [string, 'null'] }
+        attempts: { type: integer, minimum: 0 }
+        createdAt: { $ref: '#/components/schemas/Timestamp' }
+        updatedAt: { $ref: '#/components/schemas/Timestamp' }
+    AdminUser:
+      type: object
+      required: [id, email, displayName, role, status, createdAt, lastLoginAt, suspendedAt]
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        email: { type: string }
+        displayName: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        status: { $ref: '#/components/schemas/UserStatus' }
+        createdAt: { $ref: '#/components/schemas/Timestamp' }
+        lastLoginAt:
+          oneOf:
+            - { $ref: '#/components/schemas/Timestamp' }
+            - { type: 'null' }
+        suspendedAt:
+          oneOf:
+            - { $ref: '#/components/schemas/Timestamp' }
+            - { type: 'null' }
+    AdminUserDetail:
+      allOf:
+        - { $ref: '#/components/schemas/AdminUser' }
+        - type: object
+          required: [suspendedReason, activeSessionCount]
+          properties:
+            suspendedReason: { type: [string, 'null'] }
+            activeSessionCount: { type: integer, minimum: 0 }
+    AuditLogEntry:
+      type: object
+      required: [id, occurredAt, actor, action, target, ip, userAgent, requestId, metadata]
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        occurredAt: { $ref: '#/components/schemas/Timestamp' }
+        actor:
+          description: Null means system or anonymous.
+          oneOf:
+            - type: object
+              required: [id, email]
+              properties:
+                id: { $ref: '#/components/schemas/Uuid' }
+                email: { type: string }
+            - { type: 'null' }
+        action: { $ref: '#/components/schemas/AuditAction' }
+        target:
+          type: object
+          required: [type, id]
+          properties:
+            type: { $ref: '#/components/schemas/AuditTargetType' }
+            id:
+              oneOf:
+                - { $ref: '#/components/schemas/Uuid' }
+                - { type: 'null' }
+        ip: { type: [string, 'null'] }
+        userAgent: { type: [string, 'null'] }
+        requestId: { type: [string, 'null'] }
+        metadata:
+          type: object
+          description: Never contains passwords, tokens, amounts, notes or transaction details.
+          additionalProperties: true
+    PlatformMetrics:
+      type: object
+      required: [generatedAt, users, wallets, transactions, recurringTemplates]
+      properties:
+        generatedAt: { $ref: '#/components/schemas/Timestamp' }
+        users:
+          type: object
+          required: [total, active30d, new30d, suspended, admins]
+          properties:
+            total: { type: integer, minimum: 0 }
+            active30d: { type: integer, minimum: 0, description: Signed in within 30 days. }
+            new30d: { type: integer, minimum: 0 }
+            suspended: { type: integer, minimum: 0 }
+            admins: { type: integer, minimum: 0 }
+        wallets:
+          type: object
+          required: [total, active]
+          properties:
+            total: { type: integer, minimum: 0 }
+            active: { type: integer, minimum: 0, description: Not archived. }
+        transactions:
+          type: object
+          required: [total, last30d]
+          properties:
+            total: { type: integer, minimum: 0 }
+            last30d: { type: integer, minimum: 0, description: Created within 30 days. }
+        recurringTemplates:
+          type: object
+          required: [active]
+          properties:
+            active: { type: integer, minimum: 0 }
+    Health:
+      type: object
+      required: [status, version, uptimeSeconds, checks]
+      properties:
+        status: { type: string, enum: [ok, degraded] }
+        version: { type: string }
+        uptimeSeconds: { type: integer, minimum: 0 }
+        checks:
+          type: object
+          required: [database]
+          properties:
+            database: { type: string, enum: [up, down] }
+
+    # ---- Pagination ----------------------------------------------------
+    TransactionPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Transaction' }
+        nextCursor: { type: [string, 'null'] }
+    RecurringRunPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/RecurringRun' }
+        nextCursor: { type: [string, 'null'] }
+    AuditLogPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AuditLogEntry' }
+        nextCursor: { type: [string, 'null'] }
+    AdminUserPage:
+      type: object
+      required: [items, page, pageSize, totalItems, totalPages]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AdminUser' }
+        page: { type: integer, minimum: 1 }
+        pageSize: { type: integer, minimum: 1 }
+        totalItems: { type: integer, minimum: 0 }
+        totalPages: { type: integer, minimum: 0 }
+
+    # ---- Reports -------------------------------------------------------
+    ReportSummary:
+      type: object
+      required: [from, to, wallets, totalsByCurrency, recentTransactions, budgets]
+      properties:
+        from: { $ref: '#/components/schemas/LocalDate' }
+        to: { $ref: '#/components/schemas/LocalDate' }
+        wallets:
+          type: array
+          description: Non-archived wallets with current balance.
+          items: { $ref: '#/components/schemas/Wallet' }
+        totalsByCurrency:
+          type: array
+          items:
+            type: object
+            required: [currency, balanceMinor, incomeMinor, expenseMinor, netMinor]
+            properties:
+              currency: { $ref: '#/components/schemas/CurrencyCode' }
+              balanceMinor:
+                allOf:
+                  - { $ref: '#/components/schemas/SignedAmountMinor' }
+                description: Current balance across non-archived wallets.
+              incomeMinor: { type: integer, minimum: 0 }
+              expenseMinor: { type: integer, minimum: 0 }
+              netMinor: { $ref: '#/components/schemas/SignedAmountMinor' }
+        recentTransactions:
+          type: array
+          maxItems: 10
+          description: Within range, ordered by date_desc.
+          items: { $ref: '#/components/schemas/Transaction' }
+        budgets:
+          type: array
+          description: Status for the period containing `to`.
+          items: { $ref: '#/components/schemas/Budget' }
+    ReportTrend:
+      type: object
+      required: [from, to, groupBy, currency, buckets]
+      properties:
+        from: { $ref: '#/components/schemas/LocalDate' }
+        to: { $ref: '#/components/schemas/LocalDate' }
+        groupBy: { $ref: '#/components/schemas/TrendGroupBy' }
+        currency: { $ref: '#/components/schemas/CurrencyCode' }
+        buckets:
+          type: array
+          description: Every bucket in range, empty buckets as zeros. Weeks start Monday.
+          items:
+            type: object
+            required: [periodStart, periodEnd, incomeMinor, expenseMinor, netMinor]
+            properties:
+              periodStart: { $ref: '#/components/schemas/LocalDate' }
+              periodEnd: { $ref: '#/components/schemas/LocalDate' }
+              incomeMinor: { type: integer, minimum: 0 }
+              expenseMinor: { type: integer, minimum: 0 }
+              netMinor: { $ref: '#/components/schemas/SignedAmountMinor' }
+    ReportCategoryBreakdown:
+      type: object
+      required: [from, to, type, currency, totalMinor, items, other]
+      properties:
+        from: { $ref: '#/components/schemas/LocalDate' }
+        to: { $ref: '#/components/schemas/LocalDate' }
+        type: { $ref: '#/components/schemas/CategoryType' }
+        currency: { $ref: '#/components/schemas/CurrencyCode' }
+        totalMinor: { type: integer, minimum: 0 }
+        items:
+          type: array
+          description: Descending by amount.
+          items:
+            type: object
+            required: [category, amountMinor, percentage, transactionCount]
+            properties:
+              category: { $ref: '#/components/schemas/CategoryRef' }
+              amountMinor: { type: integer, minimum: 0 }
+              percentage: { type: number, description: 2 decimals. }
+              transactionCount: { type: integer, minimum: 0 }
+        other:
+          description: Percentages across items and other sum to exactly 100.00 when totalMinor is greater than 0 (largest-remainder rounding).
+          oneOf:
+            - type: object
+              required: [amountMinor, percentage, categoryCount]
+              properties:
+                amountMinor: { type: integer, minimum: 0 }
+                percentage: { type: number }
+                categoryCount: { type: integer, minimum: 0 }
+            - { type: 'null' }
+
+    # ---- Requests (strict) --------------------------------------------
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password, displayName]
+      properties:
+        email: { $ref: '#/components/schemas/Email' }
+        password: { $ref: '#/components/schemas/NewPassword' }
+        displayName: { type: string, minLength: 1, maxLength: 80 }
+        currency:
+          allOf:
+            - { $ref: '#/components/schemas/CurrencyCode' }
+          default: USD
+        locale:
+          allOf:
+            - { $ref: '#/components/schemas/Locale' }
+          default: en-US
+        timezone:
+          allOf:
+            - { $ref: '#/components/schemas/TimeZone' }
+          default: UTC
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email: { type: string }
+        password: { type: string }
+    ForgotPasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email: { type: string }
+    PasswordResetTokenRequest:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token: { type: string }
+    ResetPasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [token, newPassword]
+      properties:
+        token: { type: string }
+        newPassword: { $ref: '#/components/schemas/NewPassword' }
+    UpdateProfileRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        displayName: { type: string, minLength: 1, maxLength: 80 }
+        preferences:
+          type: object
+          additionalProperties: false
+          properties:
+            currency: { $ref: '#/components/schemas/CurrencyCode' }
+            locale: { $ref: '#/components/schemas/Locale' }
+            timezone: { $ref: '#/components/schemas/TimeZone' }
+            theme: { $ref: '#/components/schemas/Theme' }
+    ChangePasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword: { type: string }
+        newPassword:
+          allOf:
+            - { $ref: '#/components/schemas/NewPassword' }
+          description: Must differ from the current password.
+    CreateWalletRequest:
+      type: object
+      additionalProperties: false
+      required: [name, type]
+      properties:
+        name:
+          {
+            type: string,
+            minLength: 1,
+            maxLength: 60,
+            description: 'Unique per user, case-insensitive.',
+          }
+        type: { $ref: '#/components/schemas/WalletType' }
+        currency:
+          allOf:
+            - { $ref: '#/components/schemas/CurrencyCode' }
+          description: Defaults to the preference currency.
+        openingBalanceMinor:
+          allOf:
+            - { $ref: '#/components/schemas/SignedAmountMinor' }
+          default: 0
+    UpdateWalletRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 60 }
+        type: { $ref: '#/components/schemas/WalletType' }
+        currency:
+          allOf:
+            - { $ref: '#/components/schemas/CurrencyCode' }
+          description: Only while the wallet has no transactions and no templates.
+        openingBalanceMinor: { $ref: '#/components/schemas/SignedAmountMinor' }
+    CreateCategoryRequest:
+      type: object
+      additionalProperties: false
+      required: [name, type, icon, color]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 40 }
+        type: { $ref: '#/components/schemas/CategoryType' }
+        icon: { $ref: '#/components/schemas/IconKey' }
+        color: { $ref: '#/components/schemas/ColorToken' }
+    UpdateCategoryRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 40 }
+        icon: { $ref: '#/components/schemas/IconKey' }
+        color: { $ref: '#/components/schemas/ColorToken' }
+    DeleteCategoryResult:
+      type: object
+      required: [reassignedTransactions, reassignedTemplates, deletedBudgets]
+      properties:
+        reassignedTransactions: { type: integer, minimum: 0 }
+        reassignedTemplates: { type: integer, minimum: 0 }
+        deletedBudgets: { type: integer, minimum: 0 }
+    CreateTransactionRequest:
+      type: object
+      additionalProperties: false
+      required: [type, walletId, categoryId, amountMinor, occurredOn]
+      properties:
+        type: { type: string, enum: [income, expense] }
+        walletId: { $ref: '#/components/schemas/Uuid' }
+        categoryId: { $ref: '#/components/schemas/Uuid' }
+        amountMinor: { $ref: '#/components/schemas/AmountMinor' }
+        occurredOn: { $ref: '#/components/schemas/LocalDate' }
+        note: { $ref: '#/components/schemas/Note' }
+    UpdateTransactionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          enum: [income, expense]
+          description: If changed, `categoryId` of the matching type is required unless the current category already matches.
+        walletId:
+          allOf:
+            - { $ref: '#/components/schemas/Uuid' }
+          description: Currency follows the new wallet.
+        categoryId: { $ref: '#/components/schemas/Uuid' }
+        amountMinor: { $ref: '#/components/schemas/AmountMinor' }
+        occurredOn: { $ref: '#/components/schemas/LocalDate' }
+        note: { $ref: '#/components/schemas/Note' }
+    CreateTransferRequest:
+      type: object
+      additionalProperties: false
+      required: [fromWalletId, toWalletId, amountMinor, occurredOn]
+      properties:
+        fromWalletId: { $ref: '#/components/schemas/Uuid' }
+        toWalletId: { $ref: '#/components/schemas/Uuid' }
+        amountMinor:
+          allOf:
+            - { $ref: '#/components/schemas/AmountMinor' }
+          description: In the fromWallet currency.
+        toAmountMinor:
+          allOf:
+            - { $ref: '#/components/schemas/AmountMinor' }
+          description: In the toWallet currency. Required if the currencies differ; if they are the same, optional and must equal amountMinor.
+        occurredOn: { $ref: '#/components/schemas/LocalDate' }
+        note: { $ref: '#/components/schemas/Note' }
+    UpdateTransferRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        fromWalletId: { $ref: '#/components/schemas/Uuid' }
+        toWalletId: { $ref: '#/components/schemas/Uuid' }
+        amountMinor: { $ref: '#/components/schemas/AmountMinor' }
+        toAmountMinor: { $ref: '#/components/schemas/AmountMinor' }
+        occurredOn: { $ref: '#/components/schemas/LocalDate' }
+        note: { $ref: '#/components/schemas/Note' }
+    CreateBudgetRequest:
+      type: object
+      additionalProperties: false
+      required: [scope, amountMinor]
+      properties:
+        scope: { $ref: '#/components/schemas/BudgetScope' }
+        categoryId:
+          allOf:
+            - { $ref: '#/components/schemas/Uuid' }
+          description: An expense category. Required if scope is `category`; must be absent if `overall`.
+        period: { $ref: '#/components/schemas/BudgetPeriod' }
+        amountMinor: { $ref: '#/components/schemas/AmountMinor' }
+        currency:
+          allOf:
+            - { $ref: '#/components/schemas/CurrencyCode' }
+          description: Defaults to the preference currency.
+        warningThresholdPct: { type: integer, minimum: 1, maximum: 99, default: 80 }
+        startDate:
+          allOf:
+            - { $ref: '#/components/schemas/LocalDate' }
+          description: Defaults to the start of the current period; normalized to the period start.
+    UpdateBudgetRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        amountMinor: { $ref: '#/components/schemas/AmountMinor' }
+        warningThresholdPct: { type: integer, minimum: 1, maximum: 99 }
+        startDate: { $ref: '#/components/schemas/LocalDate' }
+    CreateRecurringTemplateRequest:
+      type: object
+      additionalProperties: false
+      required: [name, type, walletId, categoryId, amountMinor, frequency, startDate]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 60 }
+        type: { $ref: '#/components/schemas/RecurringType' }
+        walletId: { $ref: '#/components/schemas/Uuid' }
+        categoryId:
+          allOf:
+            - { $ref: '#/components/schemas/Uuid' }
+          description: The category type must match `type`.
+        amountMinor: { $ref: '#/components/schemas/AmountMinor' }
+        note: { $ref: '#/components/schemas/Note' }
+        frequency: { $ref: '#/components/schemas/RecurringFrequency' }
+        interval: { type: integer, minimum: 1, maximum: 99, default: 1 }
+        startDate:
+          allOf:
+            - { $ref: '#/components/schemas/LocalDate' }
+          description: On or after today minus 31 days (user timezone).
+        endDate:
+          description: On or after startDate.
+          oneOf:
+            - { $ref: '#/components/schemas/LocalDate' }
+            - { type: 'null' }
+    UpdateRecurringTemplateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 60 }
+        walletId: { $ref: '#/components/schemas/Uuid' }
+        categoryId: { $ref: '#/components/schemas/Uuid' }
+        amountMinor: { $ref: '#/components/schemas/AmountMinor' }
+        note: { $ref: '#/components/schemas/Note' }
+        frequency: { $ref: '#/components/schemas/RecurringFrequency' }
+        interval: { type: integer, minimum: 1, maximum: 99 }
+        startDate: { $ref: '#/components/schemas/LocalDate' }
+        endDate:
+          oneOf:
+            - { $ref: '#/components/schemas/LocalDate' }
+            - { type: 'null' }
+    PreviewRecurringRequest:
+      type: object
+      additionalProperties: false
+      required: [frequency, startDate]
+      properties:
+        frequency: { $ref: '#/components/schemas/RecurringFrequency' }
+        interval: { type: integer, minimum: 1, maximum: 99, default: 1 }
+        startDate: { $ref: '#/components/schemas/LocalDate' }
+        endDate:
+          oneOf:
+            - { $ref: '#/components/schemas/LocalDate' }
+            - { type: 'null' }
+        fromDate:
+          allOf:
+            - { $ref: '#/components/schemas/LocalDate' }
+          description: Returns occurrences on or after this date. Defaults to today in the user's timezone.
+        count: { type: integer, minimum: 1, maximum: 24, default: 5 }
+    SuspendUserRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason: { type: string, maxLength: 500 }
+    ChangeRoleRequest:
+      type: object
+      additionalProperties: false
+      required: [role]
+      properties:
+        role: { $ref: '#/components/schemas/Role' }
