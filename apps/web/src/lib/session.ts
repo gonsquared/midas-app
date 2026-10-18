@@ -32,6 +32,12 @@ export function setSession(session: AuthSession): void {
   emit();
 }
 
+/** Replaces the signed-in user (profile or preference changes) without touching the token. */
+export function updateSessionUser(user: User): void {
+  snapshot = { user };
+  emit();
+}
+
 /** Clears token and user from memory (logout, forced sign-out). */
 export function clearSession(): void {
   accessToken = null;

@@ -53,5 +53,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD ["node", "-e", "fetch('http://127.0.0.1:' + (process.env.PORT || 3000) + '/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
 
 # Default: HTTP server with the scheduler (SCHEDULER_ENABLED). Migrations run as a separate step:
-#   node --import tsx src/cli.ts migrate
+#   node --import tsx src/cli.ts migrate && node --import tsx src/cli.ts seed:system
 CMD ["node", "--import", "tsx", "src/server.ts"]

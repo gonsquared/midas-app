@@ -23,4 +23,6 @@ regexes = [
   '''change-me-[a-z0-9-]+''',
   # Throwaway password for the CI-only Postgres service container.
   '''ci-not-a-secret''',
+  # Fixed fake password-reset token used by web unit tests (reset-token.test.ts, register-reset.test.tsx).
+  '''abcDEF123_-abcDEF123_-abcDEF123_-abcDEF1234''',
 ]

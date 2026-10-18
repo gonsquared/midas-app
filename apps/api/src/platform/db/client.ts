@@ -94,11 +94,37 @@ export function createDatabaseClient(settings: PoolSettings): DatabaseClient {
     });
   });
 
-  const db = new Kysely<Database>({
+  return { db: createKysely(pool), pool };
+}
+
+/** The one Kysely configuration (PostgresDialect plus CamelCasePlugin) over an existing pool. */
+export function createKysely(pool: pg.Pool): Kysely<Database> {
+  return new Kysely<Database>({
     dialect: new PostgresDialect({ pool }),
     plugins: [new CamelCasePlugin()],
   });
-  return { db, pool };
+}
+
+/** Startup options added to the owner connection for CLI tasks (database design notes 13.4). */
+export const OWNER_SESSION_OPTIONS = '-c lock_timeout=5000 -c TimeZone=UTC';
+
+/**
+ * Single-connection client for CLI tasks that run as the owner role (`seed:*`), built from the
+ * same connection settings as migrations. Uses the driver type mapping (database design notes 3.4).
+ * A seed must fail fast instead of queueing behind a long lock, and timestamps are written in UTC,
+ * so `lock_timeout` and `TimeZone` are appended to any options the connection already carries.
+ */
+export function createOwnerDatabaseClient(connection: pg.ClientConfig): DatabaseClient {
+  const options = [connection.options, OWNER_SESSION_OPTIONS].filter(Boolean).join(' ');
+  const pool = new pg.Pool({
+    ...connection,
+    options,
+    max: 1,
+    types: pgTypes,
+    application_name: 'midas-cli',
+  });
+  pool.on('error', () => undefined);
+  return { db: createKysely(pool), pool };
 }
 
 const RETRYABLE_SQLSTATES = new Set(['40P01', '40001']);

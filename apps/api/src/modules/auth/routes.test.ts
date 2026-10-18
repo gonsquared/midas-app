@@ -52,7 +52,7 @@ describe('POST /api/v1/auth/register', () => {
     expect(res.headers['cache-control']).toBe('no-store');
     const [pair, ...attributes] = String(res.headers['set-cookie']).split('; ');
     expect(pair?.startsWith('midas_rt=')).toBe(true);
-    expect(pair?.slice('midas_rt='.length)).toHaveLength(43);
+    expect(pair?.slice('midas_rt='.length)).toMatch(/^[0-9a-f-]{36}\.[A-Za-z0-9_-]{43}$/);
     expect(attributes).toEqual([
       'HttpOnly',
       'Secure',

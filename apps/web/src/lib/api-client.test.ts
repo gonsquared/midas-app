@@ -1,6 +1,12 @@
 import type { AuthSession } from '@midas/shared';
 import { describe, expect, it, vi } from 'vitest';
-import { ApiError, createApiClient, getErrorMessage, type ApiClientDeps } from './api-client';
+import {
+  ApiError,
+  buildUrl,
+  createApiClient,
+  getErrorMessage,
+  type ApiClientDeps,
+} from './api-client';
 import type { SessionStore } from './session';
 
 const USER_ID = '3f2b8c1e-9d44-4a55-8f0c-0a1b2c3d4e5f';
@@ -207,5 +213,58 @@ describe('api client safety', () => {
     await expect(client.request('https://evil.example/x')).rejects.toThrow();
     await expect(client.request('wallets')).rejects.toThrow();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects dot segments, query and fragment characters in the path', async () => {
+    const { client, fetchMock } = setup([]);
+    for (const path of ['/transactions/../wallets', '/transactions/.', '/a/x?y=1', '/a/x#frag']) {
+      await expect(client.request(path)).rejects.toThrow();
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('accepts an encoded id as a single segment', () => {
+    expect(buildUrl('/api/v1', `/transactions/${encodeURIComponent('a/b?c')}`, undefined)).toBe(
+      '/api/v1/transactions/a%2Fb%3Fc',
+    );
+  });
+});
+
+describe('api client cross-tab refresh', () => {
+  it('serialises the refresh call with a Web Lock when the browser has one', async () => {
+    const events: string[] = [];
+    const request = vi.fn(async (name: string, callback: () => Promise<unknown>) => {
+      events.push(`lock:${name}`);
+      const result = await callback();
+      events.push('unlock');
+      return result;
+    });
+    vi.stubGlobal('navigator', { ...globalThis.navigator, locks: { request } });
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith('/auth/refresh')) {
+        events.push('refresh');
+        return json(200, makeSession('tok-2'));
+      }
+      const auth = new Headers(init?.headers).get('Authorization');
+      return auth === 'Bearer tok-2' ? json(200, { ok: 1 }) : problem(401, 'UNAUTHENTICATED');
+    });
+    const client = createApiClient({ fetch: fetchMock, session: memoryStore('old') });
+    await client.request('/a');
+    expect(request).toHaveBeenCalledOnce();
+    expect(request.mock.calls[0]![0]).toBe('midas-session-refresh');
+    expect(events).toEqual(['lock:midas-session-refresh', 'refresh', 'unlock']);
+  });
+});
+
+describe('api client query strings', () => {
+  it('sends arrays as repeated keys and skips undefined', async () => {
+    const { client, fetchMock } = setup([json(200, {})]);
+    await client.request('/transactions', {
+      query: { walletId: ['a', 'b'], limit: 25, q: undefined, includeArchived: true },
+    });
+    expect(String(fetchMock.mock.calls[0]![0])).toBe(
+      '/api/v1/transactions?walletId=a&walletId=b&limit=25&includeArchived=true',
+    );
   });
 });

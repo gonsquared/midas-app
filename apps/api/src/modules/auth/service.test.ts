@@ -1,5 +1,5 @@
 import { RegisterRequestSchema } from '@midas/shared';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createFakeAuth, fakeHasher, uniqueViolation } from '../../../test/support/fakes.js';
 import { argon2Hasher } from './password-hasher.js';
 import { AuthService } from './service.js';
@@ -24,10 +24,12 @@ function setup(hasher = fakeHasher) {
   });
   const service = new AuthService({
     unitOfWork: fake.unitOfWork,
+    repositories: fake.repositories,
     hasher,
     accessTokens,
     clock: { now: () => NOW },
     refreshTokenTtlDays: 30,
+    sessionAbsoluteTtlDays: 90,
   });
   return { fake, service, accessTokens };
 }
@@ -117,5 +119,109 @@ describe('AuthService.register', () => {
     await expect(service.register(input, context)).rejects.toThrow('boom');
     expect(fake.users).toHaveLength(0);
     await expect(service.register(input, context)).resolves.toBeDefined();
+  });
+});
+
+describe('AuthService.refresh (reuse detection, ADR-007)', () => {
+  function setupRefresh() {
+    let current = NOW;
+    const fake = createFakeAuth({ now: () => current });
+    const service = new AuthService({
+      unitOfWork: fake.unitOfWork,
+      repositories: fake.repositories,
+      hasher: fakeHasher,
+      accessTokens: createAccessTokenService({
+        secret: 'unit-test-secret-with-at-least-32-chars',
+        ttlSeconds: 600,
+      }),
+      clock: { now: () => current },
+      refreshTokenTtlDays: 30,
+      sessionAbsoluteTtlDays: 90,
+    });
+    return {
+      fake,
+      service,
+      advance: (ms: number) => {
+        current = new Date(current.getTime() + ms);
+      },
+    };
+  }
+
+  it('embeds the session id in the refresh token', async () => {
+    const { fake, service } = setupRefresh();
+    const { refreshToken } = await service.register(input, context);
+    expect(refreshToken.startsWith(`${fake.sessions[0]?.id}.`)).toBe(true);
+    expect(refreshToken.split('.')[1]).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  });
+
+  it('revokes the session when a token older than the previous one is replayed', async () => {
+    const { fake, service } = setupRefresh();
+    const original = (await service.register(input, context)).refreshToken;
+    const second = await service.refresh(original);
+    const third = await service.refresh(second.refreshToken);
+    expect(third.refreshToken).not.toBe(second.refreshToken);
+
+    // `original` is two rotations old: no hash column holds it any more.
+    await expect(service.refresh(original)).rejects.toMatchObject({ code: 'SESSION_INVALID' });
+    expect(fake.sessions[0]).toMatchObject({ revokedReason: 'reuse_detected' });
+    expect(fake.sessions[0]?.revokedAt).not.toBeNull();
+    // The legitimate newest token is cut off too.
+    await expect(service.refresh(third.refreshToken)).rejects.toMatchObject({
+      code: 'SESSION_INVALID',
+    });
+  });
+
+  it('rejects malformed tokens without reading or revoking anything', async () => {
+    const { fake, service } = setupRefresh();
+    await service.register(input, context);
+    const sid = fake.sessions[0]?.id ?? '';
+    const findByRefreshHash = vi.spyOn(fake.repositories.sessions, 'findByRefreshHash');
+    const findById = vi.spyOn(fake.repositories.sessions, 'findById');
+    for (const bad of [
+      '',
+      'A'.repeat(43),
+      `${sid}.short`,
+      `${sid}.${'A'.repeat(44)}`,
+      `${sid.toUpperCase()}.${'A'.repeat(43)}`,
+      `not-a-uuid.${'A'.repeat(43)}`,
+      `${sid}.${'A'.repeat(43)}.extra`,
+    ]) {
+      await expect(service.refresh(bad)).rejects.toMatchObject({ code: 'SESSION_INVALID' });
+    }
+    expect(findByRefreshHash).not.toHaveBeenCalled();
+    expect(findById).not.toHaveBeenCalled();
+    expect(fake.sessions[0]?.revokedAt).toBeNull();
+  });
+
+  it('does not revoke when the named session does not exist or is already revoked', async () => {
+    const { fake, service } = setupRefresh();
+    const { refreshToken } = await service.register(input, context);
+    const sid = fake.sessions[0]?.id ?? '';
+    const unknown = `${'0'.repeat(8)}-0000-0000-0000-${'0'.repeat(12)}.${'A'.repeat(43)}`;
+    await expect(service.refresh(unknown)).rejects.toMatchObject({ code: 'SESSION_INVALID' });
+    expect(fake.sessions[0]?.revokedAt).toBeNull();
+
+    await service.logout({ sessionId: sid });
+    const reason = fake.sessions[0]?.revokedReason;
+    await expect(service.refresh(refreshToken)).rejects.toMatchObject({ code: 'SESSION_INVALID' });
+    expect(fake.sessions[0]?.revokedReason).toBe(reason);
+  });
+
+  it('keeps the 20 second grace window for the immediately superseded token', async () => {
+    const { fake, service, advance } = setupRefresh();
+    const original = (await service.register(input, context)).refreshToken;
+    await service.refresh(original);
+    advance(5_000);
+    await expect(service.refresh(original)).resolves.toBeDefined();
+    expect(fake.sessions[0]?.revokedAt).toBeNull();
+  });
+
+  it('revokes when the superseded token is replayed after the grace window', async () => {
+    const { fake, service, advance } = setupRefresh();
+    const original = (await service.register(input, context)).refreshToken;
+    await service.refresh(original);
+    advance(21_000);
+    await expect(service.refresh(original)).rejects.toMatchObject({ code: 'SESSION_INVALID' });
+    expect(fake.sessions[0]?.revokedReason).toBe('reuse_detected');
   });
 });

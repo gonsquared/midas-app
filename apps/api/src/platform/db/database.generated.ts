@@ -11,6 +11,19 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
 
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
+export interface Categories {
+  color: string;
+  createdAt: Generated<Timestamp>;
+  icon: string;
+  id: Generated<string>;
+  name: string;
+  ownerUserId: string | null;
+  retiredAt: Timestamp | null;
+  systemKey: string | null;
+  type: string;
+  updatedAt: Generated<Timestamp>;
+}
+
 export interface PasswordResetTokens {
   createdAt: Generated<Timestamp>;
   expiresAt: Timestamp;
@@ -35,6 +48,30 @@ export interface Sessions {
   userId: string;
 }
 
+export interface Transactions {
+  amountMinor: number;
+  categoryId: string | null;
+  createdAt: Generated<Timestamp>;
+  currency: string;
+  id: Generated<string>;
+  note: string | null;
+  occurredOn: string;
+  signedAmountMinor: Generated<number | null>;
+  transferDirection: string | null;
+  transferId: string | null;
+  type: string;
+  updatedAt: Generated<Timestamp>;
+  userId: string;
+  walletId: string;
+}
+
+export interface Transfers {
+  createdAt: Generated<Timestamp>;
+  id: Generated<string>;
+  updatedAt: Generated<Timestamp>;
+  userId: string;
+}
+
 export interface Users {
   createdAt: Generated<Timestamp>;
   currency: Generated<string>;
@@ -53,8 +90,25 @@ export interface Users {
   updatedAt: Generated<Timestamp>;
 }
 
+export interface Wallets {
+  archivedAt: Timestamp | null;
+  createdAt: Generated<Timestamp>;
+  currency: string;
+  id: Generated<string>;
+  ledgerBalanceMinor: Generated<number>;
+  name: string;
+  openingBalanceMinor: Generated<number>;
+  type: string;
+  updatedAt: Generated<Timestamp>;
+  userId: string;
+}
+
 export interface DB {
+  categories: Categories;
   passwordResetTokens: PasswordResetTokens;
   sessions: Sessions;
+  transactions: Transactions;
+  transfers: Transfers;
   users: Users;
+  wallets: Wallets;
 }

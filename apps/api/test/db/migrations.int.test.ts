@@ -207,27 +207,97 @@ describeDb('schema migrations (real PostgreSQL)', () => {
   });
 
   it('grants midas_app data access but no TRUNCATE (privilege matrix)', async () => {
-    const rows = await owner.query<{ t: string; priv: string; ok: boolean }>(`
-      SELECT t, priv, has_table_privilege('midas_app', 'public.' || t, priv) AS ok
-      FROM unnest(ARRAY['users','sessions','password_reset_tokens']) AS t,
-           unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE']) AS priv`);
-    expect(rows.rows).toHaveLength(15);
+    const tables = [
+      'users',
+      'sessions',
+      'password_reset_tokens',
+      'wallets',
+      'categories',
+      'transfers',
+      'transactions',
+    ];
+    const rows = await owner.query<{ t: string; priv: string; ok: boolean }>(
+      `SELECT t, priv, has_table_privilege('midas_app', 'public.' || t, priv) AS ok
+       FROM unnest($1::text[]) AS t,
+            unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE']) AS priv`,
+      [tables],
+    );
+    expect(rows.rows).toHaveLength(tables.length * 5);
     for (const row of rows.rows) {
       expect(row.ok, row.t + ' ' + row.priv).toBe(row.priv !== 'TRUNCATE');
     }
   });
 
-  it('rolls back one migration and re-applies it', async () => {
+  it('rolls back every migration from create-auth-tables onwards and re-applies them', async () => {
     const connection = { connectionString: dbTestInfo()!.ownerUrl };
-    const reverted = await runMigrations({ connection, direction: 'down', count: 1 });
-    expect(reverted[0]).toMatch(/create-auth-tables$/);
-    const gone = await owner.query(
-      "SELECT to_regclass('public.users') AS users, to_regclass('public.sessions') AS sessions",
-    );
-    expect(gone.rows[0]).toEqual({ users: null, sessions: null });
+    const files = await listMigrationFiles();
+    const auth = files.findIndex((name) => name.endsWith('_create-auth-tables'));
+    const expected = files.slice(auth).reverse();
+    const reverted = await runMigrations({ connection, direction: 'down', count: expected.length });
+    expect(reverted).toEqual(expected);
+    const probe = `SELECT to_regclass('public.users') AS users, to_regclass('public.sessions') AS sessions,
+                          to_regclass('public.wallets') AS wallets, to_regclass('public.categories') AS categories,
+                          to_regclass('public.transfers') AS transfers, to_regclass('public.transactions') AS transactions`;
+    const gone = await owner.query(probe);
+    expect(Object.values(gone.rows[0]).every((v) => v === null)).toBe(true);
+    const fns = await owner.query(`SELECT proname FROM pg_proc WHERE proname = ANY($1::text[])`, [
+      [
+        'apply_wallet_balance',
+        'assert_transfer_pair',
+        'assert_category_accessible',
+        'forbid_category_owner_change',
+      ],
+    ]);
+    expect(fns.rowCount).toBe(0);
+
     await runMigrations({ connection, direction: 'up' });
-    const back = await owner.query("SELECT to_regclass('public.users') AS users");
-    expect(back.rows[0].users).toBe('users');
+    const back = await owner.query(probe);
+    expect(back.rows[0]).toEqual({
+      users: 'users',
+      sessions: 'sessions',
+      wallets: 'wallets',
+      categories: 'categories',
+      transfers: 'transfers',
+      transactions: 'transactions',
+    });
+  });
+
+  it('resets wallet ledger balances when the ledger migration is reverted, so up starts clean', async () => {
+    const connection = { connectionString: dbTestInfo()!.ownerUrl };
+    const files = await listMigrationFiles();
+    const ledgerIndex = files.findIndex((name) =>
+      name.endsWith('_create-transfers-and-transactions'),
+    );
+    const count = files.length - ledgerIndex;
+    const userId = await insertUser();
+    const wallet = await owner.query<{ id: string }>(
+      `INSERT INTO wallets (user_id, name, type, currency) VALUES ($1, 'Cash', 'cash', 'USD')
+       RETURNING id`,
+      [userId],
+    );
+    const walletId = wallet.rows[0]!.id;
+    await owner.query(
+      `INSERT INTO transactions (user_id, wallet_id, type, category_id, amount_minor, currency, occurred_on)
+       SELECT $1, $2, 'expense', id, 1234, 'USD', DATE '2026-10-01'
+         FROM categories WHERE system_key = 'expense.groceries'`,
+      [userId, walletId],
+    );
+    const balance = async () =>
+      (
+        await owner.query<{ b: string }>(
+          'SELECT ledger_balance_minor::text AS b FROM wallets WHERE id = $1',
+          [walletId],
+        )
+      ).rows[0]!.b;
+    expect(await balance()).toBe('-1234');
+
+    try {
+      await runMigrations({ connection, direction: 'down', count });
+      expect(await balance()).toBe('0');
+    } finally {
+      await runMigrations({ connection, direction: 'up' });
+    }
+    expect(await balance()).toBe('0');
   });
 
   it('migrate:verify proves up, down to zero and up again give identical catalogs', async () => {

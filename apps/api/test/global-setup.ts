@@ -2,6 +2,8 @@ import { randomBytes } from 'node:crypto';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import pg from 'pg';
 import type { TestProject } from 'vitest/node';
+import { seedSystemCategories } from '../db/seeds/system-categories.js';
+import { createKysely } from '../src/platform/db/client.js';
 import { runMigrations } from '../src/platform/db/migrate.js';
 
 export interface DbTestInfo {
@@ -61,6 +63,13 @@ async function prepareDatabase(
     await owner.query('GRANT USAGE ON SCHEMA public TO midas_app');
   } finally {
     await owner.end();
+  }
+  // seed:system as the owner, as in a release (database design notes 16.2).
+  const seedPool = new pg.Pool({ connectionString: ownerUrl, max: 1 });
+  try {
+    await seedSystemCategories(createKysely(seedPool));
+  } finally {
+    await seedPool.end();
   }
 
   const appUrl = new URL(ownerUrl);

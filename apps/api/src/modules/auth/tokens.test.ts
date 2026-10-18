@@ -7,6 +7,7 @@ import {
   createAccessTokenService,
   generateRefreshToken,
   hashRefreshToken,
+  parseRefreshToken,
 } from './tokens.js';
 
 const secret = 'unit-test-secret-with-at-least-32-chars';
@@ -17,14 +18,30 @@ const claims = {
 };
 
 describe('refresh tokens', () => {
-  it('generates 32 random bytes as base64url with a matching SHA-256 digest', () => {
-    const a = generateRefreshToken();
-    const b = generateRefreshToken();
-    expect(a.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  const sid = claims.sessionId;
+
+  it('is <sid>.<32 random bytes base64url> with a matching SHA-256 digest', () => {
+    const a = generateRefreshToken(sid);
+    const b = generateRefreshToken(sid);
+    expect(a.token.startsWith(`${sid}.`)).toBe(true);
+    expect(a.token.split('.')[1]).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(a.token).not.toBe(b.token);
     expect(a.hash).toHaveLength(32);
     expect(a.hash.equals(createHash('sha256').update(a.token).digest())).toBe(true);
     expect(hashRefreshToken(a.token).equals(a.hash)).toBe(true);
+  });
+
+  it('parses the session id back and rejects anything malformed', () => {
+    expect(parseRefreshToken(generateRefreshToken(sid).token)).toEqual({ sessionId: sid });
+    for (const bad of [
+      '',
+      'A'.repeat(43),
+      `${sid}.`,
+      `${sid}.${'A'.repeat(42)}`,
+      `x.${'A'.repeat(43)}`,
+    ]) {
+      expect(parseRefreshToken(bad)).toBeNull();
+    }
   });
 });
 

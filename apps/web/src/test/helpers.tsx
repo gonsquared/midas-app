@@ -63,11 +63,16 @@ export function stubRefresh(session: AuthSession | null): ReturnType<typeof vi.f
 export async function renderApp(path: string) {
   const router = createAppRouter({ history: createMemoryHistory({ initialEntries: [path] }) });
   const queryClient = createQueryClient();
+  // Tests assert failures immediately instead of waiting out the retry backoff.
+  queryClient.setDefaultOptions({
+    queries: { retry: false, staleTime: 30_000 },
+    mutations: { retry: false },
+  });
   const utils = render(
     <AppProviders queryClient={queryClient}>
       <RouterProvider router={router} />
     </AppProviders>,
   );
   await router.load();
-  return { router, ...utils };
+  return { router, queryClient, ...utils };
 }
