@@ -30,10 +30,13 @@ function makeSession(token: string): AuthSession {
 
 function memoryStore(initial: string | null = null): SessionStore & { token: () => string | null } {
   let token = initial;
+  let userId: string | null = initial ? USER_ID : null;
   return {
     getAccessToken: () => token,
+    getUserId: () => userId,
     setSession: (s) => {
       token = s.accessToken;
+      userId = s.user.id;
     },
     clearSession: () => {
       token = null;
@@ -145,6 +148,29 @@ describe('api client refresh', () => {
     await Promise.all([client.request('/a'), client.request('/b'), client.request('/c')]);
     const refreshCalls = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/auth/refresh'));
     expect(refreshCalls).toHaveLength(1);
+  });
+
+  it('signals a user switch when refresh returns a different user, not for the same user', async () => {
+    const other = makeSession('tok-2');
+    other.user = { ...other.user, id: '9a8b7c6d-1111-4222-8333-444455556666' };
+    const onSessionUserChanged = vi.fn();
+    const run = async (refreshed: AuthSession) => {
+      const fetchMock = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(problem(401, 'UNAUTHENTICATED'))
+        .mockResolvedValueOnce(json(200, refreshed))
+        .mockResolvedValueOnce(json(200, { done: true }));
+      const client = createApiClient({
+        fetch: fetchMock,
+        session: memoryStore('tok-1'),
+        onSessionUserChanged,
+      });
+      await client.request('/wallets');
+    };
+    await run(makeSession('tok-2'));
+    expect(onSessionUserChanged).not.toHaveBeenCalled();
+    await run(other);
+    expect(onSessionUserChanged).toHaveBeenCalledOnce();
   });
 
   it('clears the session and signals expiry when refresh fails', async () => {

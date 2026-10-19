@@ -86,6 +86,27 @@ describe('logout', () => {
     expect(await screen.findByText('You have signed out.')).toBeVisible();
   });
 
+  it('stays on sign-in and does not refresh with the still-valid cookie when logout fails', async () => {
+    setViewport(VIEWPORT.desktop);
+    signedInAs('user');
+    const api = mockApi({
+      'POST /auth/logout': problem(500, 'INTERNAL_ERROR'),
+      'POST /auth/refresh': ok(makeAuthSession()),
+    });
+    const user = userEvent.setup();
+    const { router } = await renderApp('/dashboard');
+    await screen.findByRole('heading', { name: 'Dashboard' });
+    await user.click(screen.getByRole('button', { name: /Account menu for Kim Morgan/ }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Sign out' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/login'));
+    expect(getSessionSnapshot().user).toBeNull();
+    expect(await screen.findByText(/could not reach the server to end your session/)).toBeVisible();
+    await router.navigate({ to: '/login' });
+    await router.navigate({ to: '/register' });
+    expect(router.state.location.pathname).toBe('/register');
+    expect(api.callsTo('POST /auth/refresh')).toHaveLength(0);
+  });
+
   it('drops cached server data and keeps credentials out of web storage and script-readable cookies', async () => {
     setViewport(VIEWPORT.desktop);
     signedInAs('user');

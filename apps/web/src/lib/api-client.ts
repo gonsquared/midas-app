@@ -76,6 +76,8 @@ export interface ApiClientDeps {
   session?: SessionStore;
   /** Called after a refresh failed and the session was cleared (forced sign-out). */
   onSessionExpired?: () => void;
+  /** Called after a refresh returned a different user than the current session. */
+  onSessionUserChanged?: () => void;
 }
 
 export interface ApiDownload {
@@ -250,7 +252,13 @@ export function createApiClient(deps: ApiClientDeps = {}): ApiClient {
           // A 2xx with an unusable body is a server fault, not proof the session is dead.
           return null;
         }
+        const previousUserId = session.getUserId?.() ?? null;
         session.setSession(next);
+        // The cookie now belongs to someone else (e.g. another tab signed in as a different
+        // user): nothing cached for the old user may be shown to the new one.
+        if (previousUserId !== null && previousUserId !== next.user.id) {
+          deps.onSessionUserChanged?.();
+        }
         return next;
       } catch {
         // A network failure during refresh does not prove the session is dead.
@@ -305,4 +313,14 @@ export function setSessionExpiredHandler(handler: (() => void) | undefined): voi
   sessionExpiredHandler = handler;
 }
 
-export const api = createApiClient({ onSessionExpired: () => sessionExpiredHandler?.() });
+let sessionUserChangedHandler: (() => void) | undefined;
+
+/** Registers the reaction to a refresh that switched users (set once at bootstrap). */
+export function setSessionUserChangedHandler(handler: (() => void) | undefined): void {
+  sessionUserChangedHandler = handler;
+}
+
+export const api = createApiClient({
+  onSessionExpired: () => sessionExpiredHandler?.(),
+  onSessionUserChanged: () => sessionUserChangedHandler?.(),
+});

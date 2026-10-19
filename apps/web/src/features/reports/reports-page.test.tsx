@@ -6,6 +6,10 @@ import { renderApp, setViewport, signedInAs, VIEWPORT } from '@/test/helpers';
 import { makeCategory, makeWallet, resetFixtureIds } from '@/test/fixtures';
 import { mockApi, ok, problem } from '@/test/mock-api';
 
+// The first test pays for the lazily imported chart chunk (about 1.7 s on an idle machine). With
+// the whole suite and the API tests running at once it timed out at 20 s, so allow more headroom.
+vi.setConfig({ testTimeout: 60_000 });
+
 const groceries = makeCategory({ name: 'Groceries', color: 'green' });
 const trend = {
   from: '2026-10-01',

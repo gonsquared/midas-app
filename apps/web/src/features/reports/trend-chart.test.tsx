@@ -1,7 +1,7 @@
 import type { ReportTrend } from '@midas/shared';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { axe } from 'vitest-axe';
 import { TrendChart } from './trend-chart';
 
@@ -30,6 +30,31 @@ function trend(overrides: Partial<ReportTrend> = {}): ReportTrend {
     ...overrides,
   };
 }
+
+// Recharts measures its container with ResizeObserver, which jsdom lacks. Report a fixed size so
+// the plot always draws, and load the lazy chunk once up front so no test races the dynamic import
+// (the cause of timeouts when the whole suite runs in parallel).
+class FixedSizeResizeObserver {
+  constructor(private readonly callback: ResizeObserverCallback) {}
+  observe(target: Element): void {
+    const rect = { width: 640, height: 280 } as DOMRectReadOnly;
+    this.callback(
+      [{ target, contentRect: rect } as unknown as ResizeObserverEntry],
+      this as unknown as ResizeObserver,
+    );
+  }
+  unobserve(): void {}
+  disconnect(): void {}
+}
+
+beforeAll(async () => {
+  await import('./trend-plot');
+}, 60_000);
+
+// The shared setup unstubs globals after every test, so stub again before each one.
+beforeEach(() => {
+  vi.stubGlobal('ResizeObserver', FixedSizeResizeObserver);
+});
 
 describe('TrendChart', () => {
   it('renders the Recharts plot as SVG and describes it for assistive technology', async () => {
@@ -134,7 +159,6 @@ describe('TrendChart', () => {
 });
 
 async function expectSvg(container: HTMLElement) {
-  const { waitFor } = await import('@testing-library/react');
   await waitFor(() => expect(container.querySelector('svg.recharts-surface')).not.toBeNull(), {
     timeout: 15_000,
   });
