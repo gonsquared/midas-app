@@ -11,7 +11,7 @@ The review summaries, API reference and user guide now exist (`docs/reviews/`, `
 
 - [ ] E10-F2-S3: manual screen-reader testing (NVDA, VoiceOver) has not been performed; run it or explicitly waive it. A11Y-02 (wallet row-menu focus return) is fixed. See [accessibility audit](../qa/accessibility-audit.md).
 - [x] README and user guide screenshots added (`docs/images/`, rendered from the fake API, so sample data; the admin audit log is not pictured).
-- [ ] The first GitHub run of the `production-image` job and of the coverage CI step has not been observed (verified locally by qa-agent only).
+- [x] The `production-image` job and the coverage CI step ran green on GitHub (pull request 9, run 39265739192).
 - [ ] Branch protection: update the required checks for the renamed `production-image` job.
 - [ ] Version bump: the root `package.json` is still `0.0.0`.
 - [ ] Release notes and a GitHub release are not written.

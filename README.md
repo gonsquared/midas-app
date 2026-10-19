@@ -146,7 +146,7 @@ To run the two dev servers on the host instead of in containers, start only the 
 
 - **Development:** `docker compose up --build` uses the `dev` stage of `infra/docker/Dockerfile`.
 - **Production image:** `docker build -f infra/docker/Dockerfile --target runtime -t midas:local .` builds a multi-stage image with compiled JavaScript, production dependencies only, a non-root user and a healthcheck on `/health`. The API serves the built web app from the same origin (`WEB_DIST_DIR`). Running it needs a migrated database and the environment variables above; see [docs/operations/deployment.md](./docs/operations/deployment.md).
-- **CI:** the `production-image` job builds the image, runs the migrations and seed, smoke-tests it and runs the whole Playwright suite against it. It has been reproduced locally; TODO: confirm the first run on GitHub.
+- **CI:** the `production-image` job builds the image, runs the migrations and seed, smoke-tests it and runs the whole Playwright suite against it. It passed on GitHub on pull request 9 (run 39265739192), including the coverage step in the main job.
 
 ### Database migrations
 
