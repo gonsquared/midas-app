@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from '../support/test';
 import { installFakeApi, makeWallet } from '../support/fake-api';
 
 test('adds transactions from the composer and filters the ledger with URL state', async ({

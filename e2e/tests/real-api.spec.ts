@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from '../support/test';
 
 /**
  * Real-API smoke path: no request interception. Needs the SPA (Vite proxies /api to the API) and
@@ -150,12 +150,12 @@ test('replaying an old-generation refresh token revokes the whole session (reuse
   expect(first?.value).toMatch(/^[\w-]+\.[\w-]+$/);
   await page.reload();
   await expect(page).toHaveURL(/\/dashboard$/);
+  // The URL settles before the silent refresh finishes, so wait for the rotated cookie.
+  await expect.poll(async () => (await refreshCookie())?.value).not.toBe(first?.value);
   const second = await refreshCookie();
-  expect(second?.value).not.toBe(first?.value);
   await page.reload();
   await expect(page).toHaveURL(/\/dashboard$/);
-  const third = await refreshCookie();
-  expect(third?.value).not.toBe(second?.value);
+  await expect.poll(async () => (await refreshCookie())?.value).not.toBe(second?.value);
 
   // Replay the token from two rotations ago, as a thief would. Sent by hand with a clean context.
   const origin = new URL(page.url()).origin;
@@ -176,4 +176,65 @@ test('replaying an old-generation refresh token revokes the whole session (reuse
   // The legitimate holder is cut off too: the session was revoked, so a reload bounces to sign-in.
   await page.reload();
   await expect(page).toHaveURL(/\/login/);
+});
+
+// E10-F2-S2: the budget, dashboard and recurring journeys against the real API and database (the
+// fake-API specs cover their UI states; this proves the contract and the server-side math).
+test('budget, dashboard and recurring journeys against the real API', async ({ page }) => {
+  const email = `journey-${Date.now()}-${Math.floor(Math.random() * 1e6)}@example.com`;
+  await page.goto('/register');
+  await page.getByLabel('Name').fill('Journey Tester');
+  await page.getByLabel('Email').fill(email);
+  await page.getByLabel('Password', { exact: true }).fill(PASSWORD);
+  await page.getByRole('button', { name: 'Create account' }).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+
+  await page.goto('/wallets');
+  await page.getByRole('link', { name: 'Create wallet' }).first().click();
+  const walletDialog = page.getByRole('dialog', { name: 'Create wallet' });
+  await walletDialog.getByLabel(/Name/).fill('Journey Checking');
+  await walletDialog.getByRole('radio', { name: /Bank/ }).check({ force: true });
+  await walletDialog.getByLabel('Opening balance').fill('2000');
+  await walletDialog.getByRole('button', { name: 'Create wallet' }).click();
+  await expect(page.getByRole('link', { name: 'Journey Checking' })).toBeVisible();
+
+  await page.goto('/transactions?compose=expense');
+  const composer = page.getByRole('dialog', { name: 'Add transaction' });
+  await composer.getByLabel(/Amount/).fill('45');
+  await composer.getByRole('combobox', { name: /Category/ }).click();
+  await page.getByRole('option', { name: /Groceries/ }).click();
+  await composer.getByLabel(/Note/).fill('Journey groceries');
+  await composer.getByRole('button', { name: 'Add expense' }).click();
+  await expect(composer).toBeHidden();
+
+  // An overall monthly budget below what was just spent is exceeded, computed by the server.
+  await page.goto('/budgets');
+  await page.getByRole('button', { name: 'Create budget' }).first().click();
+  const budgetDialog = page.getByRole('dialog', { name: 'Create budget' });
+  await budgetDialog.getByLabel('Limit').fill('40');
+  await budgetDialog.getByRole('button', { name: 'Create budget' }).click();
+  await expect(budgetDialog).toBeHidden();
+  await expect(page.getByRole('region', { name: /Needs attention/ })).toContainText(
+    'Over by $5.00',
+  );
+
+  // The dashboard reads the same ledger: balance after the expense, and the budget warning.
+  await page.goto('/dashboard');
+  await expect(page.getByTestId('hero-balance')).toContainText('$1,955.00');
+  await expect(page.getByRole('region', { name: 'Needs attention' })).toContainText(
+    /overall monthly budget is exceeded by \$5\.00/,
+  );
+
+  await page.goto('/recurring');
+  await page.getByRole('button', { name: 'Create recurring' }).first().click();
+  const recurring = page.getByRole('dialog', { name: 'Create recurring transaction' });
+  await recurring.getByLabel(/^Name/).fill('Journey Rent');
+  await recurring.getByLabel(/^Amount/).fill('12');
+  await recurring.getByLabel(/^Wallet/).selectOption({ label: 'Journey Checking (USD)' });
+  await recurring.getByLabel(/^Category/).selectOption({ label: 'Groceries' });
+  await recurring.getByRole('button', { name: 'Create recurring' }).click();
+  await expect(recurring).toBeHidden();
+  await expect(page.getByRole('table', { name: 'Recurring transactions' })).toContainText(
+    'Journey Rent',
+  );
 });

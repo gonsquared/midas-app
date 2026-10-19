@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from '../support/test';
 import { installFakeApi } from '../support/fake-api';
 import { installSprint3Api, makeAdminUser, newSprint3State } from '../support/fake-sprint3';
 

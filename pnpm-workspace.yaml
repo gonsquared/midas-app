@@ -4,7 +4,7 @@ packages:
   - 'e2e'
 
 # Dependency audit policy (CI runs `pnpm audit --audit-level=high` over ALL dependencies, because
-# the runtime image ships devDependencies and runs the API through tsx).
+# dev tooling such as kysely-codegen and Vite also runs in CI and on developer machines).
 auditConfig:
   ignoreGhsas:
     # braces <=3.0.3 stack-exhaustion DoS (CVE-2026-93687). Reached only through
