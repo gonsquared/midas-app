@@ -508,10 +508,10 @@ interface Mailer { send(message: { to: string; subject: string; text: string; ht
 | Lint, format, typecheck, test, build | install (cached) → lint → format check → typecheck → unit and integration tests → build → web bundle dev-code check → migrations and seed applied twice to a scratch database → generated database types up to date |
 | Secret scan (gitleaks) | gitleaks over full history with `.gitleaks.toml` |
 | Dependency audit | `pnpm audit --audit-level=high` over all dependencies |
-| Docker image build (no push) | builds the `runtime` target |
+| Production image | builds the `runtime` target, checks it (non-root, no secrets, no dev tooling), starts it on PostgreSQL, smoke-tests /health, the SPA and the API 404, then runs the whole Playwright suite against it under the real CSP |
 | Browser tests (Playwright, fake API) | Playwright against the Vite dev server |
 
-Branch protection on `master` requires these five checks.
+Branch protection on `master` requires these five checks (the image job was renamed from Docker image build (no push); update the required-check list).
 
 **Planned, not yet implemented.** A coverage gate; osv-scanner and CodeQL; a nightly end-to-end run against the compose stack built from the production image with axe checks (needs the SPA served by the API, see ADR-004); and a `release.yml` on `v*` tags that builds and pushes the image, generates the OpenAPI artifact and creates a GitHub release. These arrive with the Sprint 4 stories, and branch protection will be extended when they exist.
 

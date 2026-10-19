@@ -13,8 +13,11 @@ Everything a contributor or operator needs, in one place. Start with the root
 | Understand the database design in depth (schema, indexes, consistency, backup) | [Database design](./database.md) |
 | Build or review UI (design system, flows, layouts, accessibility, microcopy) | [UI design](./ui-design.md) |
 | Understand why the system is built this way | [Architecture decision records](./adr/README.md) (18 decisions: stack, auth, money, scheduling, deployment) |
-| Call or extend the API | [OpenAPI 3.1 draft](../apps/api/openapi/openapi.yaml), with each operation tagged implemented or planned |
+| Call or extend the API (auth model, conventions, errors, pagination, rate limits) | [API reference](./api/README.md), then the [OpenAPI 3.1 description](../apps/api/openapi/openapi.yaml), with each operation tagged implemented or planned |
+| Learn how to use the app (accounts, wallets, transactions, budgets, recurring, reports, admin) | [User guide](./user-guide.md) |
+| See the Sprint 4 review outcomes (findings, status, authorization table) | [Backend security review](./reviews/sprint-4-backend-security-review.md) and [frontend review](./reviews/sprint-4-frontend-review.md) |
 | Understand the database, migrations and seeds | [apps/api/db/README.md](../apps/api/db/README.md) |
+| Deploy, release, roll back, back up and restore | [Deployment guide](./operations/deployment.md) |
 | Operate or recover a deployment | [Operations runbooks](./operations/README.md) and the [runbook template](./operations/runbook-template.md) |
 | Report a security issue | [SECURITY.md](../SECURITY.md) |
 | Record a new architecture decision | [ADR template](./adr/template.md) |
@@ -26,7 +29,11 @@ Everything a contributor or operator needs, in one place. Start with the root
 - Runbooks are written from commands that were actually run.
 - No secrets, personal data or internal references appear in any document.
 
+## Reviews
+
+Review outcomes live in `docs/reviews/`: [backend code and security review](./reviews/sprint-4-backend-security-review.md) (2026-10-19) and [frontend code review](./reviews/sprint-4-frontend-review.md) (2026-10-19).
+
 ## Not yet written
 
-A user guide and deployment runbooks arrive with the release stories. This page will link to them
-when they exist.
+Screenshots for the README and the user guide are a marked TODO. The OpenAPI file is committed and
+checked by tests; it is not yet served by the running API or published as a hosted site.

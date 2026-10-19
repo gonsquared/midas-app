@@ -5,7 +5,11 @@ asking anyone, starting from [runbook-template.md](./runbook-template.md).
 
 | Runbook | When to use it |
 | --- | --- |
-| _None yet._ Deployment and incident runbooks are written with the release stories. | |
+| [deployment.md](./deployment.md) | Deploy, release, roll back, back up and restore: image, environment, migrations, first admin, proxy and HTTPS, scheduler |
+| [troubleshoot-api.md](./troubleshoot-api.md) | Triage of API failures: health, logs and request ids, metrics, rate limits, CORS/CSP, mail, audit, scheduler |
+| [release-checklist.md](./release-checklist.md) | Cut the v1.0 release: open gates, secrets, database, tag, post-deploy checks |
+
+Restore is covered inside the deployment runbook (backups and restore).
 
 ## Writing a runbook
 

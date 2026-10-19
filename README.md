@@ -2,10 +2,9 @@
 
 A personal finance tracker for recording income, expenses and transfers across multiple wallets, planning spending with budgets, automating regular items, and understanding your money through a dashboard and reports.
 
-> **Status: Sprint 2 (Core Features) implemented; Sprint 3 (Secondary Features) implemented in the API and the web app and through the QA gate; Sprint 4 not started.**
-> Implemented: pnpm monorepo, CI, Docker Compose stack, design system, database migrations, and the Sprint 2 features (registration, login and sessions, password reset, profile and settings, wallets, categories, transactions, transfers) in both the API and the web app. Sprint 3 adds CSV export, budgets with overspend warnings, the dashboard and reports (charts with table alternatives, date-range selector), recurring transactions, and the admin area (users, default categories, platform metrics, audit log) in both the API and the web app. Architecture decisions are in [docs/adr/](./docs/adr/README.md); the full documentation map is [docs/README.md](./docs/README.md).
+> **Status: Sprint 4 (Quality and Release) in progress; v1.0 is not released.** Sprints 1 to 3 are complete: the API and web app cover registration, sign-in, password reset, wallets, categories, transactions, transfers, CSV export, budgets, dashboard and reports, recurring transactions and the admin area. Sprint 4 added security hardening, a production Docker image that serves the web app, coverage thresholds, accessibility, end-to-end and performance checks, and the deployment and troubleshooting guides. Still open before v1.0: review summaries, manual screen-reader testing, the API reference and user guide, and the first CI run of the production-image job; see [docs/operations/release-checklist.md](./docs/operations/release-checklist.md) and the Final Backlog Review in `docs/dev-stories-tracker.md`. Architecture decisions are in [docs/adr/](./docs/adr/README.md); the full documentation map is [docs/README.md](./docs/README.md).
 
-## Features (planned for v1)
+## Features (v1 scope)
 
 - **Dashboard:** balances per wallet and per currency, income vs expense for a period, trends, category breakdown, budget status.
 - **Wallets:** cash, bank, card and savings wallets, each in one currency, with an opening balance, archiving and transfers between wallets.
@@ -18,6 +17,33 @@ A personal finance tracker for recording income, expenses and transfers across m
 - **Admin:** user management (search, suspend, reactivate, roles), system categories, platform metrics and an audit log. Admins cannot see users' private financial records.
 
 Out of scope for v1: bank syncing, shared wallets, receipt OCR, native mobile apps, payments and subscriptions.
+
+## Screenshots
+
+TODO: no screenshots are committed yet and none have been fabricated. Capture these screens from the running app (light theme unless noted) and add them under `docs/images/`:
+
+1. Sign-in page
+2. Dashboard (balances, income vs expense, category breakdown, budget status)
+3. Dashboard in dark theme
+4. Wallets list
+5. Transactions list with filters
+6. Budgets with a warning and an exceeded state
+7. Reports (charts and their table alternatives)
+8. Recurring transactions
+9. Admin users and audit log
+
+## Quickstart
+
+With Docker (needs Docker with Compose, Node.js 24 and Corepack):
+
+```bash
+corepack enable
+pnpm install
+cp .env.example .env            # replace every change-me-* placeholder
+docker compose up --build       # then open http://localhost:5173
+```
+
+Password reset emails appear in Mailpit at http://localhost:8025. Running on the host without containers, the production image and all environment variables are covered in [Local setup](#local-setup), [Docker usage](#docker-usage) and [Environment variables](#environment-variables).
 
 ## Tech stack
 
@@ -35,7 +61,7 @@ The web app also uses TanStack Router and Query; browser tests use Playwright (`
 
 ## Architecture summary
 
-- **Modular monolith.** One Fastify process hosts the domain modules. The React SPA is built separately and is planned to be served from the same origin by the API (not implemented yet, see Deployment notes).
+- **Modular monolith.** One Fastify process hosts the domain modules. The React SPA is built separately and served from the same origin by the API in the production image (`WEB_DIST_DIR`), so there is no CORS and one thing to deploy. In development Vite serves it and proxies `/api`.
 - **Shared package.** `@midas/shared` holds Zod schemas and helpers used by both apps.
 - **Money** is stored as integer minor units.
 - **Database.** PostgreSQL 17 with SQL migrations (node-pg-migrate) and generated Kysely types. The app connects as a restricted role; migrations run as the owner role (`DATABASE_MIGRATION_URL`).
@@ -57,6 +83,21 @@ midas-app/
 ├─ compose.yaml  .env.example  package.json  pnpm-workspace.yaml
 └─ README.md  CONTRIBUTING.md  SECURITY.md  LICENSE
 ```
+
+## Scripts
+
+| Command | What it does |
+| --- | --- |
+| `pnpm install` | Install dependencies |
+| `pnpm lint`, `pnpm format:check`, `pnpm typecheck` | ESLint, Prettier check, `tsc --noEmit` |
+| `pnpm format` | Prettier, writes changes |
+| `pnpm test` | Unit and integration tests in shared, api and web |
+| `pnpm test:coverage` | Same with V8 coverage; thresholds fail the run (enforced in CI) |
+| `pnpm build` | Build every workspace that defines a build script |
+| `pnpm test:e2e` | Playwright suites in `e2e/` |
+| `pnpm --filter @midas/api dev` / `pnpm --filter @midas/web dev` | API (watch) and Vite dev servers |
+| `pnpm --filter @midas/api test:perf` | 100,000 transaction performance baseline (needs Docker; not part of `pnpm test`) |
+| `pnpm --filter @midas/api migrate` and related | Database migrations, see below |
 
 ## Local setup
 
@@ -101,6 +142,12 @@ pnpm --filter @midas/web dev    # Vite dev server (port 5173), proxies /api to t
 
 To run the two dev servers on the host instead of in containers, start only the backing services: `docker compose up -d db mailpit`, then `migrate` and `seed:system` (below), then the two dev servers. Set `CORS_ORIGINS` only if the browser calls the API from an origin other than the Vite proxy.
 
+### Docker usage
+
+- **Development:** `docker compose up --build` uses the `dev` stage of `infra/docker/Dockerfile`.
+- **Production image:** `docker build -f infra/docker/Dockerfile --target runtime -t midas:local .` builds a multi-stage image with compiled JavaScript, production dependencies only, a non-root user and a healthcheck on `/health`. The API serves the built web app from the same origin (`WEB_DIST_DIR`). Running it needs a migrated database and the environment variables above; see [docs/operations/deployment.md](./docs/operations/deployment.md).
+- **CI:** the `production-image` job builds the image, runs the migrations and seed, smoke-tests it and runs the whole Playwright suite against it. It has been reproduced locally; TODO: confirm the first run on GitHub.
+
 ### Database migrations
 
 Run from the repository root; each maps to a script in `apps/api/package.json`.
@@ -126,7 +173,7 @@ docker compose exec db pg_dump -U midas_owner -Fc midas > midas.dump
 docker compose exec -T db pg_restore -U midas_owner -d midas --clean --if-exists < midas.dump
 ```
 
-Production targets: provider point-in-time recovery, daily encrypted logical dumps, and restores always into a new instance, never over the live one. The `db:check` integrity command is planned and not implemented. Runbooks live in [docs/operations/](./docs/operations/README.md); none are written yet, only the [template](./docs/operations/runbook-template.md).
+Production targets: provider point-in-time recovery, daily encrypted logical dumps, and restores always into a new instance, never over the live one. The `db:check` integrity command is planned and not implemented. Production backup, restore and rollback steps are in the [deployment guide](./docs/operations/deployment.md); other runbooks live in [docs/operations/](./docs/operations/README.md).
 
 ## Checks and tests
 
@@ -137,14 +184,21 @@ pnpm typecheck
 pnpm test
 pnpm build
 pnpm test:e2e                   # Playwright against the Vite dev server with a fake API (no database)
+# Against the production build served by the API, under its real CSP (what CI does with the image):
+#   E2E_BASE_URL=http://localhost:3000 E2E_SERVED_BUILD=1 pnpm test:e2e
 ```
 
 - `pnpm test` runs Vitest in `@midas/shared`, `@midas/api` and `@midas/web`.
+- **Coverage:** `pnpm test:coverage` (V8) enforces per-package thresholds, which CI also runs. Floors sit a few points below the last measured values (lines at the last QA run: shared 96.6%, api 93.4%, web 88.1%); the thresholds themselves live in each package's Vitest config.
+- **Accessibility:** `e2e/tests/a11y.spec.ts` runs axe-core (WCAG 2.1 A and AA) on the main routes in light and dark themes; `e2e/tests/keyboard.spec.ts` checks keyboard flows; `apps/web/src/styles/contrast.test.ts` checks token contrast. Manual screen-reader testing (NVDA, VoiceOver) has not been done. Results and open issues: [docs/qa/accessibility-audit.md](./docs/qa/accessibility-audit.md).
+- **Performance:** `pnpm --filter @midas/api test:perf` seeds 100,000 transactions on PostgreSQL 17 and checks list, report, dashboard and export timings against limits. Targets and measurements: [docs/qa/performance-baseline.md](./docs/qa/performance-baseline.md). Concurrent load is not measured.
+- **Test map:** [docs/qa/acceptance-test-map.md](./docs/qa/acceptance-test-map.md) lists the tests per story.
 - Database-backed API tests use Testcontainers, which **needs Docker**, or an existing PostgreSQL 17 server when `TEST_DATABASE_URL` is set (admin URL; a throwaway database is created and dropped). They are skipped when neither is available, so a green run without Docker does not exercise them.
 - Do not substitute PGlite: it is PostgreSQL 18 and fails some DB tests (different SQLSTATE for `ON DELETE RESTRICT`, lost protocol sync after errors).
 - Watch mode: `pnpm --filter @midas/api test:watch`.
 - `pnpm test:e2e` specs intercept `/api/v1` with an in-memory fake. Set `E2E_BASE_URL` to target an already running app instead of starting Vite. Install the browser once with `pnpm --filter @midas/e2e exec playwright install chromium` (add `--with-deps` on a fresh Linux machine; CI does).
 - **Opt-in real-API e2e** (`e2e/tests/real-api.spec.ts`) needs a running API on PostgreSQL 17 with `migrate` and `seed:system` applied: `E2E_REAL_API=1 E2E_BASE_URL=http://localhost:5173 pnpm test:e2e -- real-api`. The password-reset spec also needs `E2E_MAIL_LOG` set to the API log file, with the API started using `MAIL_TRANSPORT=console` and `LOG_LEVEL=info`. Without `E2E_REAL_API=1` these specs are skipped.
+- **Production build under the real CSP.** The CI job "Production image" builds the Docker image, runs it on PostgreSQL and runs the whole suite against it with `E2E_BASE_URL`, `E2E_SERVED_BUILD=1` and `E2E_REAL_API=1`. `E2E_SERVED_BUILD=1` makes every test fail on any `securitypolicyviolation` from the server's own `Content-Security-Policy` header and enables `e2e/tests/csp.spec.ts`. To do the same locally, build (`pnpm build`), start the API from `apps/api` (`node --env-file=../../.env dist/server.js`, it serves `apps/web/dist`) and set those variables. On Windows Playwright's `webServer` cannot find `pnpm`, so always use `E2E_BASE_URL` there.
 
 ## Environment variables
 
@@ -179,6 +233,7 @@ pnpm test:e2e                   # Playwright against the Vite dev server with a 
 | `RATE_LIMIT_FORGOT_IP_MAX` | no | `10` | Forgot-password requests per IP, per hour |
 | `RATE_LIMIT_RESET_MAX` | no | `10` | Reset and verify requests per IP, per hour |
 | `RATE_LIMIT_REFRESH_MAX` | no | `30` | Per session (IP when the cookie is missing or malformed), per minute |
+| `RATE_LIMIT_REFRESH_IP_MAX` | no | `60` | All refresh attempts per IP, per minute (backstop for forged session ids) |
 | `RATE_LIMIT_PASSWORD_CHANGE_MAX` | no | `10` | Per user, per hour |
 | `RATE_LIMIT_USER_WRITE_MAX` | no | `120` | Authenticated writes per user, per minute |
 | `RATE_LIMIT_USER_READ_MAX` | no | `600` | Authenticated reads per user, per minute |
@@ -204,7 +259,8 @@ pnpm test:e2e                   # Playwright against the Vite dev server with a 
 | `BOOTSTRAP_ADMIN_EMAIL` | no | none | One-time: while no admin exists, creates this account as admin at boot with an unusable password (set a real one with "Forgot password"). Refuses, with an error log, if the email already has an account. Remove it afterwards |
 | `EXPORT_MAX_DURATION_SECONDS` | no | `300` | Absolute time cap per CSV export; a slower download is aborted |
 | `DATABASE_MAINTENANCE_URL`, `AUDIT_RETENTION_DAYS`, `SEED_DEMO_PASSWORD` | no | see `.env.example` | Listed for later work (audit purge, dev seed); not read by the config module yet |
-| `E2E_BASE_URL`, `E2E_REAL_API`, `E2E_MAIL_LOG` | no | none | Playwright only, see Checks and tests |
+| `WEB_DIST_DIR` | no | `../web/dist` from the working directory (`/app/web` in the image) | Folder with the built web app, served from the API origin. If it has no `index.html` the API runs without it |
+| `E2E_BASE_URL`, `E2E_SERVED_BUILD`, `E2E_REAL_API`, `E2E_MAIL_LOG` | no | none | Playwright only, see Checks and tests |
 
 The web dev server also reads `VITE_DEV_HOST` (see [CONTRIBUTING.md](./CONTRIBUTING.md)).
 
@@ -253,7 +309,7 @@ pnpm --filter @midas/api cli jobs:run recurring     # one generation pass, then 
 - **Access token:** short-lived HS256 JWT (`ACCESS_TOKEN_TTL_SECONDS`, default 600), sent as a bearer token; only HS256 is accepted.
 - **Refresh token:** format `<session uuid>.<43 base64url chars>` (32 random bytes). Only its SHA-256 hash is stored. Sent as the `midas_rt` cookie (`HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`). The session id inside is not trusted; it only identifies which session to revoke.
 - **Rotation and reuse detection:** each refresh rotates the token. A superseded token seen inside the grace window rotates again; outside it the token counts as replayed and the whole session is revoked (`reuse_detected`). A replayed token older than the immediately previous one still revokes the session it names. Malformed tokens are rejected without a database lookup. Sessions also end at `SESSION_ABSOLUTE_TTL_DAYS`.
-- **Rate limits:** fixed windows per endpoint (login per IP+email and per IP per minute, login per account per hour, forgot-password, reset, refresh, password change, per-user read/write, global per-IP). Only the maximums are tunable through `RATE_LIMIT_*`. Counters are in memory, one LRU store per limiter capped by `RATE_LIMIT_STORE_MAX_KEYS`, so they reset on restart and are not shared across instances. Set `TRUST_PROXY` correctly behind a reverse proxy, otherwise all clients share one IP.
+- **Rate limits:** fixed windows per endpoint (login per IP+email and per IP per minute, login per account per hour, forgot-password, reset, refresh, password change, per-user read/write, global per-IP). Only the maximums are tunable through `RATE_LIMIT_*`. Counters are in memory, one LRU store per limiter capped by `RATE_LIMIT_STORE_MAX_KEYS`, so they reset on restart and are not shared across instances (single API instance assumed; running several needs a shared store behind `createLimiter` in `apps/api/src/platform/rate-limit.ts`, the single seam where counters are kept). Limited responses are `429` problem+json with `Retry-After` and `RateLimit-*` headers. Set `TRUST_PROXY` correctly behind a reverse proxy, otherwise all clients share one IP.
 - **Per-account login limiter trade-off:** `RATE_LIMIT_LOGIN_ACCOUNT_MAX` caps attempts against one account from any IP, which blunts distributed credential stuffing, but an attacker who knows an email can send failing attempts to lock that account out of logging in until the hour window rolls over.
 - **Reset throttling trade-off:** forgot-password is throttled per email hash and per IP, so a third party can use up a victim's per-email allowance and delay the victim's own reset requests for the window. The exact response behaviour is defined by the `POST /api/v1/auth/password/forgot` operation in the OpenAPI draft.
 - **Admin boundary (ADR-018):** admin routes sit behind the normal authentication and a role check against the database row of the current request, so a demotion or suspension applies on the next call. Role changes and suspensions are serialized under an advisory lock (never the last active admin, never yourself) and audited in the same transaction. No admin endpoint returns or aggregates a user's wallets, transactions, budgets or templates; tests enumerate the routes and the API description to keep it that way.
@@ -264,8 +320,10 @@ pnpm --filter @midas/api cli jobs:run recurring     # one generation pass, then 
 
 ## Deployment notes
 
-- Release procedure: run `migrate` and `seed:system` before starting the new image.
-- TODO (Sprint 4): serve the built SPA from the API, and add a CI job that runs Playwright against the production build under the real CSP. Neither exists today; current Playwright runs use the Vite dev server.
+- Full guide: [docs/operations/deployment.md](./docs/operations/deployment.md) (image, environment variables, migrations, first admin, reverse proxy and HTTPS, scheduler, rollback, backup and restore).
+- One image (`infra/docker/Dockerfile`, target `runtime`): compiled JavaScript, production dependencies only, non-root, healthcheck on `/health`, and the API serves the built web app. CI builds it, smoke-tests it and runs the whole Playwright suite against it.
+- Release procedure: run `node dist/cli.js migrate && node dist/cli.js seed:system` with the new image before starting it.
+- Rate-limit counters are in memory, so they are per instance; see the guide before running more than one.
 
 ## Roadmap
 
@@ -274,7 +332,11 @@ pnpm --filter @midas/api cli jobs:run recurring     # one generation pass, then 
 | 1 | Foundation | Monorepo, CI, Docker, API and web skeletons, design system, migrations, registration (complete) |
 | 2 | Core Features (implemented) | Login and sessions, password reset, settings, wallets, categories, transactions, transfers |
 | 3 | Secondary Features (implemented) | CSV export, budgets, dashboard and reports, recurring transactions, admin |
-| 4 | Quality and Release | Security hardening, accessibility, performance, deployment, documentation, v1.0 release |
+| 4 | Quality and Release (in progress) | Security hardening, accessibility, performance, deployment, documentation, v1.0 release |
+
+## Documentation
+
+[Documentation map](./docs/README.md), [user guide](./docs/user-guide.md), [API reference](./docs/api/README.md), [OpenAPI draft](./apps/api/openapi/openapi.yaml), [architecture decisions](./docs/adr/README.md), [Sprint 4 backend and security review](./docs/reviews/sprint-4-backend-security-review.md), [Sprint 4 frontend review](./docs/reviews/sprint-4-frontend-review.md), [operations runbooks](./docs/operations/README.md), [release checklist](./docs/operations/release-checklist.md), [QA reports](./docs/qa/acceptance-test-map.md).
 
 ## Contributing
 

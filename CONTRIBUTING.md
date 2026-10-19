@@ -47,9 +47,13 @@ Workspace packages are declared in `pnpm-workspace.yaml`. Packages must only imp
 | `pnpm typecheck`    | `tsc --noEmit` in every workspace that defines it   |
 | `pnpm test`         | Unit tests in every workspace that defines them     |
 | `pnpm build`        | Builds every workspace that defines a build script  |
+| `pnpm test:coverage` | Tests with V8 coverage; thresholds fail the run (CI runs this) |
 | `pnpm test:e2e`     | Playwright browser tests (see the README for setup) |
+| `pnpm --filter @midas/api test:perf` | 100,000 transaction performance baseline (needs Docker, not in `pnpm test`) |
 
-Run `pnpm lint && pnpm format:check && pnpm typecheck` before opening a pull request.
+Run `pnpm lint && pnpm format:check && pnpm typecheck` before opening a pull request, and `pnpm test:coverage` when you change behaviour, since CI enforces the coverage thresholds.
+
+Browser checks beyond the basic suite: `e2e/tests/a11y.spec.ts` (axe-core) and `e2e/tests/keyboard.spec.ts` run with `pnpm test:e2e`; `e2e/tests/csp.spec.ts` needs the served-build mode below (`E2E_SERVED_BUILD=1`, `E2E_BASE_URL`). Install the browser once with `pnpm --filter @midas/e2e exec playwright install chromium`.
 
 ## Code standards
 
@@ -95,13 +99,26 @@ docker compose up --build     # db, one-shot migrate, api on :3000, web on http:
 - **Reset** (delete the database volume and start empty): `docker compose down -v`, then `docker compose up --build` again. The init script in `infra/db/init` runs only on a new volume.
 - Ports are published on 127.0.0.1 only.
 
-The Dockerfile is `infra/docker/Dockerfile` (targets `base`, `deps`, `build`, `runtime`). Build it on its own with `docker build -f infra/docker/Dockerfile --target runtime -t midas:local .`.
+The Dockerfile is `infra/docker/Dockerfile` (stages `base`, `deps`, `source`, `web-build`, `api-build`, `dev`, `runtime`). Compose uses the `dev` stage (whole workspace, dev dependencies, tsx and Vite). The `runtime` stage is the production image: compiled JavaScript, production dependencies only, non-root, and the API serves the built web app from the same origin. Build and try it on its own with `docker build -f infra/docker/Dockerfile --target runtime -t midas:local .`; running it needs a migrated database and environment variables, see [docs/operations/deployment.md](./docs/operations/deployment.md). CI builds this image, starts it and runs the whole Playwright suite against it (job "Production image").
+
+To test the built web app under the real CSP on your machine, serve it from the API and point Playwright at it (the Playwright `webServer` cannot find `pnpm` on Windows, so `E2E_BASE_URL` is also the way to run there):
+
+```bash
+pnpm build                                        # apps/web/dist and apps/api/dist
+cd apps/api && node --env-file=../../.env dist/server.js   # serves ../web/dist (WEB_DIST_DIR)
+# in a second terminal, at the repository root:
+E2E_BASE_URL=http://localhost:3000 E2E_SERVED_BUILD=1 pnpm test:e2e
+```
+
+In PowerShell set `$env:E2E_BASE_URL` and `$env:E2E_SERVED_BUILD` first.
+
+`E2E_SERVED_BUILD=1` makes every test fail on any `securitypolicyviolation` and enables `e2e/tests/csp.spec.ts`. Add `E2E_REAL_API=1` (with `APP_BASE_URL` equal to `E2E_BASE_URL` and a raised `RATE_LIMIT_REGISTER_MAX`) to include the real-API specs.
 
 ## Security checks
 
 - **Secret scanning:** the `secret-scan` job in `.github/workflows/ci.yml` runs gitleaks on every pull request and push, with `.gitleaks.toml`. To scan locally, install gitleaks and run `gitleaks dir . --config .gitleaks.toml --redact`.
 - **Allowlist process:** a finding that is a placeholder or test-only value can be allowlisted by adding a narrow regex to `.gitleaks.toml` or a path to its `paths` list. Explain the entry in the pull request, and get a maintainer review. Never allowlist a value that could be a real credential. If a real secret is committed, rotate it first (see [SECURITY.md](./SECURITY.md)).
-- **Dependency audit:** `pnpm audit --audit-level=high` runs in CI over all dependencies (not `--prod`, because the runtime image ships devDependencies and runs the API through `tsx`) and fails on high or critical advisories. The only accepted advisory is the dev-time `braces` issue reached through `kysely-codegen` (GHSA-vfj7-8cjw-p6xm). To accept another advisory, add its GHSA id to `auditConfig.ignoreGhsas` in `pnpm-workspace.yaml` with a comment giving the reason and the dependency path, in the same pull request.
+- **Dependency audit:** `pnpm audit --audit-level=high` runs in CI over all dependencies (not `--prod`, because dev tooling runs in CI and on developer machines too; the runtime image itself has production dependencies only) and fails on high or critical advisories. The only accepted advisory is the dev-time `braces` issue reached through `kysely-codegen` (GHSA-vfj7-8cjw-p6xm). To accept another advisory, add its GHSA id to `auditConfig.ignoreGhsas` in `pnpm-workspace.yaml` with a comment giving the reason and the dependency path, in the same pull request.
 - **Dependabot** (`.github/dependabot.yml`) opens weekly update pull requests for npm, Docker and GitHub Actions.
 
 ## Content Security Policy and the web app
