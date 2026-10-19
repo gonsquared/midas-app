@@ -137,14 +137,10 @@ test('a budget confirmation starts on Cancel, Escape dismisses it and focus retu
   await expect(actions).toBeFocused();
 });
 
-// Tracked defect A11Y-02 (docs/qa/accessibility-audit.md): the wallet archive confirmation, opened
-// from a row menu, does not return focus to the row's Actions button (focus falls to <body>), unlike
-// budgets, recurring and admin pages that use useReturnFocus. test.fail() turns green again, and
-// this test starts failing, the day the page is fixed: then delete the test.fail line.
+// A11Y-02 (fixed): wallet row-menu confirmations return focus to the row's Actions button.
 test('a wallet confirmation opened from the row menu returns focus to the menu button', async ({
   page,
 }) => {
-  test.fail(true, 'A11Y-02: wallet row-menu confirmations lose focus on close');
   await signedInShell(page);
   await page.goto('/wallets');
   const actions = page.getByRole('button', { name: 'Actions for Checking' });

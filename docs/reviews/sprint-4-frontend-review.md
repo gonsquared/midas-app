@@ -32,7 +32,7 @@
 | ID | Severity | Finding | Status |
 | --- | --- | --- | --- |
 | A11Y-01 | Moderate | Focus was lost when a dialog opened without a trigger closed | Fixed in `apps/web/src/components/ui/dialog.tsx`; unit test in `apps/web/src/components/ui/ui.test.tsx` and keyboard check K3 |
-| A11Y-02 | Moderate | Focus is lost after a confirmation opened from a wallet row menu | Open, tracked in [the accessibility audit](../qa/accessibility-audit.md) (fix described there; `e2e/tests/keyboard.spec.ts` carries a `test.fail` for it) |
+| A11Y-02 | Moderate | Focus is lost after a confirmation opened from a wallet row menu | Fixed (wallets page); see [the accessibility audit](../qa/accessibility-audit.md). `e2e/tests/keyboard.spec.ts` covers it |
 
 ## Not verified
 

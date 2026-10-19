@@ -13,7 +13,7 @@
 | axe-core, WCAG 2.0/2.1 A and AA rules, 17 routes in the light and the dark theme | 0 violations (34 route scans) |
 | axe-core on an open dialog and an open menu, both themes | 0 violations (2 scans) |
 | Token contrast, both themes (WCAG 1.4.3 and 1.4.11) | All 94 checks pass |
-| Keyboard checks (Playwright key presses) | 6 of 7 pass; 1 expected failure is a tracked defect (A11Y-02) |
+| Keyboard checks (Playwright key presses) | 7 of 7 pass (A11Y-02 fixed) |
 | Screen reader (NVDA, VoiceOver) | **Not performed.** Manual TODO below |
 | Defects found | 3 (1 fixed, 2 tracked); 3 further manual areas not yet checked |
 
@@ -80,7 +80,7 @@ so its contrast is measured against the surface, not against a primary fill (ui-
 | K2 | Every tab stop on the sign-in page has a visible focus indicator, in reading order (email, password, submit) | Pass |
 | K3 | A dialog (Create wallet): focus moves in, Tab and Shift+Tab never leave it (14 presses each way), the page behind is inert, Esc closes it, focus returns to the opener | Pass after the A11Y-01 fix |
 | K4 | A confirmation (delete budget) opens on Cancel, Esc dismisses it, focus returns to the row's Actions button | Pass |
-| K5 | A wallet row-menu confirmation (archive) returns focus to the Actions button | **Fail, tracked as A11Y-02** (recorded with `test.fail`) |
+| K5 | A wallet row-menu confirmation (archive) returns focus to the Actions button | Pass after the A11Y-02 fix |
 | K6 | The account menu opens with Enter, ArrowDown reaches a menu item, Esc closes it and returns focus to the button | Pass |
 | K7 | Client-side navigation moves focus to the new page `h1` | Pass |
 
@@ -89,7 +89,7 @@ so its contrast is measured against the surface, not against a primary fill (ui-
 | ID | Severity | Finding | Status |
 | --- | --- | --- | --- |
 | A11Y-01 | Moderate (WCAG 2.4.3 Focus Order) | Dialogs opened from a route link or from state (no `Dialog.Trigger`) dropped focus to `<body>` when closed, because the dialog runs in Radix non-modal mode (needed for the CSP) and non-modal Radix only restores focus to a trigger. A keyboard user landed back at the top of the page. | **Fixed** in `apps/web/src/components/ui/dialog.tsx`: `DialogContent` remembers the opener and restores focus when it was lost; callers that handle it themselves (`useReturnFocus`) still win, and focus that another dialog already took is left alone. Unit test in `ui.test.tsx`, e2e K3 |
-| A11Y-02 | Moderate (WCAG 2.4.3) | A confirmation opened from a wallet row menu (Archive, Delete) returns focus to `<body>` instead of the row's Actions button, because the menu item that opened it is unmounted and the wallets page does not use `useReturnFocus` (budgets, recurring and admin pages do). Likely the same on other pages that open a `ConfirmDialog` from a menu without `useReturnFocus` (not enumerated). | **Open.** Fix: call `capture()` from the menu item and pass `restore` as `onCloseAutoFocus` on the wallets (and any other) confirmations, as budgets-page does. `e2e/tests/keyboard.spec.ts` carries `test.fail` for it; remove that line when fixed |
+| A11Y-02 | Moderate (WCAG 2.4.3) | A confirmation opened from a wallet row menu (Archive, Delete) returns focus to `<body>` instead of the row's Actions button, because the menu item that opened it is unmounted and the wallets page does not use `useReturnFocus` (budgets, recurring and admin pages do). Likely the same on other pages that open a `ConfirmDialog` from a menu without `useReturnFocus` (not enumerated). | **Fixed** in `apps/web/src/features/wallets/wallets-page.tsx`: the opener (the row's Actions button) is captured when Archive or Delete is chosen and focus returns to it on Cancel or Esc; after a successful archive or delete the row is gone and the existing neighbour focus request decides. The `test.fail` in `e2e/tests/keyboard.spec.ts` is removed and the test passes. Other pages that open a `ConfirmDialog` from a menu were not enumerated |
 | A11Y-03 | Low (best practice, not a WCAG 2.1 A/AA failure) | axe best-practice rule `region` reports some header content and portal content (dialogs, menus) outside a landmark on all signed-in pages. | Open, informational |
 
 ## What was not done (manual TODO)

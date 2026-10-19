@@ -395,7 +395,7 @@ Not measured: concurrent load, 50,000 users and 5,000,000 audit rows (admin sear
 | --- | --- |
 | axe-core (WCAG 2.0/2.1 A and AA), 17 routes in light and dark | 0 violations (34 scans), plus an open dialog and an open menu in both themes |
 | Token contrast, both themes | 94 of 94 checks pass |
-| Keyboard checks | 6 of 7 pass; A11Y-02 open |
+| Keyboard checks | 7 of 7 pass (A11Y-02 fixed) |
 | Screen-reader testing (NVDA, VoiceOver) | **NOT performed** |
 | Zoom, reflow, text spacing, forced colors, reduced motion, touch targets, axe at mobile width | Not checked |
 

@@ -9,7 +9,7 @@ Deployment details (environment, migrations, rollback, backup) are in [deploymen
 
 The review summaries, API reference and user guide now exist (`docs/reviews/`, `docs/api/README.md`, `docs/user-guide.md`). Still open:
 
-- [ ] E10-F2-S3: manual screen-reader testing (NVDA, VoiceOver) has not been performed; run it or explicitly waive it. A11Y-02 (wallet row-menu confirmations lose focus) is also open. See [accessibility audit](../qa/accessibility-audit.md).
+- [ ] E10-F2-S3: manual screen-reader testing (NVDA, VoiceOver) has not been performed; run it or explicitly waive it. A11Y-02 (wallet row-menu focus return) is fixed. See [accessibility audit](../qa/accessibility-audit.md).
 - [ ] README and user guide screenshots are missing (placeholders only; 9 screens listed in the README).
 - [ ] The first GitHub run of the `production-image` job and of the coverage CI step has not been observed (verified locally by qa-agent only).
 - [ ] Branch protection: update the required checks for the renamed `production-image` job.
