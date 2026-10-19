@@ -1,7 +1,7 @@
 import type { Wallet } from '@midas/shared';
 import { Link, useNavigate, useRouterState, useSearch } from '@tanstack/react-router';
 import { Plus } from 'lucide-react';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { EmptyState } from '@/components/empty-state';
 import { PageHeader } from '@/components/page-header';
 import { Alert } from '@/components/ui/alert';
@@ -13,6 +13,7 @@ import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/components/ui/toast';
 import { ApiError } from '@/lib/api-client';
 import { useContainerWidth } from '@/lib/use-container-width';
+import { resolveOpener } from '@/lib/use-return-focus';
 import { unarchiveWallet, useInvalidateWallets, useWallets } from './api';
 import { WalletRows, WalletTotals } from './wallet-list';
 import { ArchiveWalletDialog, DeleteWalletDialog } from './wallet-dialogs';
@@ -124,9 +125,25 @@ export function WalletsPage() {
     }
   }
 
+  // Cancel or Esc returns focus to the row's Actions button. After an archive or delete the row
+  // is gone and the neighbour focus request (afterRemoval) decides, so only a live opener is used.
+  const opener = useRef<HTMLElement | null>(null);
+  const captureOpener = () => {
+    opener.current = resolveOpener(document.activeElement);
+  };
+  const restoreIfRowRemains = (event: Event) => {
+    event.preventDefault();
+    if (opener.current?.isConnected) opener.current.focus();
+  };
   const actions: WalletActions = {
-    onArchive: setArchiveTarget,
-    onDelete: setDeleteTarget,
+    onArchive: (wallet) => {
+      captureOpener();
+      setArchiveTarget(wallet);
+    },
+    onDelete: (wallet) => {
+      captureOpener();
+      setDeleteTarget(wallet);
+    },
     onUnarchive: (wallet) => void unarchive(wallet),
   };
 
@@ -259,7 +276,7 @@ export function WalletsPage() {
         <ArchiveWalletDialog
           wallet={archiveTarget}
           onClose={() => setArchiveTarget(null)}
-          onCloseAutoFocus={(event) => event.preventDefault()}
+          onCloseAutoFocus={restoreIfRowRemains}
           onDone={(wallet) => {
             setArchiveTarget(null);
             afterRemoval(wallet);
@@ -277,7 +294,7 @@ export function WalletsPage() {
         <DeleteWalletDialog
           wallet={deleteTarget}
           onClose={() => setDeleteTarget(null)}
-          onCloseAutoFocus={(event) => event.preventDefault()}
+          onCloseAutoFocus={restoreIfRowRemains}
           onSwitchToArchive={(wallet) => {
             setDeleteTarget(null);
             setArchiveTarget(wallet);

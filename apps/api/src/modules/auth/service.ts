@@ -180,7 +180,7 @@ export class AuthService {
       // A known account is named by id; an unknown email is stored only as an HMAC pseudonym.
       const pseudonym = found ? undefined : this.audit.pseudonymize(input.email);
       await this.audit.record({
-        actorUserId: found?.id ?? null,
+        actorUserId: null,
         action: 'auth.login_failed',
         targetType: found ? 'user' : 'system',
         targetId: found?.id ?? null,

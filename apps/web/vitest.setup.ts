@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, configure } from '@testing-library/react';
 import { afterEach, expect, vi } from 'vitest';
-import { clearSession } from './src/lib/session';
+import { clearSession, resetSignedOutByUser } from './src/lib/session';
 import * as axeMatchers from 'vitest-axe/matchers';
 
 expect.extend(axeMatchers);
@@ -11,6 +11,7 @@ configure({ asyncUtilTimeout: 4000 });
 afterEach(() => {
   cleanup();
   clearSession();
+  resetSignedOutByUser();
   vi.unstubAllGlobals();
   localStorage.clear();
   document.documentElement.removeAttribute('data-theme');

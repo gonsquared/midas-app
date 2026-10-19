@@ -56,7 +56,16 @@ describeDb('report query plans and timing (real PostgreSQL)', () => {
     } finally {
       seed.release();
     }
-    await ctx.owner.query('analyze transactions');
+    // ANALYZE samples 300 x default_statistics_target rows at random. At 1000 the sample is the
+    // whole table (200k rows), so the statistics, and the plans asserted below, are the same on
+    // every run (the breakdown plan flipped between two indexes once with the default of 100).
+    const stats = await ctx.owner.connect();
+    try {
+      await stats.query('set default_statistics_target = 1000');
+      await stats.query('analyze transactions');
+    } finally {
+      stats.release();
+    }
   }, 180_000);
 
   afterAll(async () => {

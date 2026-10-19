@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
+import { expect, test } from '../support/test';
 import { installFakeApi, makeWallet } from '../support/fake-api';
 import { installSprint3Api, makeBudget, newSprint3State } from '../support/fake-sprint3';
 

@@ -41,7 +41,11 @@ beforeAll(async () => {
   };
   subscribe('fastify.initialization', onInit);
   try {
-    app = await buildTestApp({ checkDatabase: async () => true });
+    // The static web app routes are not part of the API description: leave the SPA out.
+    app = await buildTestApp({
+      checkDatabase: async () => true,
+      env: { WEB_DIST_DIR: '/nonexistent/midas-web' },
+    });
     await app.ready();
   } finally {
     unsubscribe('fastify.initialization', onInit);

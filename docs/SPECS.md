@@ -1,11 +1,11 @@
 # Midas Specifications
 
-**Version:** 1.1
-**Date:** 2026-10-18
-**Status:** Active (Sprints 2 and 3 implemented; Sprint 4 not started)
+**Version:** 1.3
+**Date:** 2026-10-19
+**Status:** Active (Sprints 1 to 3 implemented; Sprint 4 hardening and release in progress; v1.0 is not declared ready)
 **Owner:** docs-agent
 
-Related documents: [Project brief](./project-brief.md) · [Architecture](./architecture.md) · [API contract](./api-contract.md) · [Database design](./database.md) · [UI and UX design](./ui-design.md) · [Docs index](./README.md)
+Related documents: [Project brief](./project-brief.md) · [Architecture](./architecture.md) · [API contract](./api-contract.md) · [Database design](./database.md) · [UI and UX design](./ui-design.md) · [User guide](./user-guide.md) · [API reference](./api/README.md) · [Security and code reviews](./reviews/sprint-4-backend-security-review.md) · [QA reports](./qa/acceptance-test-map.md) · [Deployment guide](./operations/deployment.md) · [Docs index](./README.md)
 
 ## Table of Contents
 
@@ -46,6 +46,8 @@ Related documents: [Project brief](./project-brief.md) · [Architecture](./archi
 | Project is easy to run and deploy | Clone to running stack; deploy path | `docker compose up` in minutes; documented one-click-style deployment |
 | Delivery is predictable | Stories marked Done by QA at release | 80 of 80 Done, or deferred with written rationale |
 
+**Measured status (2026-10-19).** Performance: the 100,000-transaction baseline is within every target (section 5, NFR-P-1; [performance baseline](./qa/performance-baseline.md)). Security: no Critical or High review finding is open; the backend and frontend review outcomes are recorded in [docs/reviews](./reviews/sprint-4-backend-security-review.md). Accessibility: axe reports 0 violations on 17 routes in both themes, but manual screen-reader testing has NOT been performed, so the accessibility goal is not yet fully met ([accessibility audit](./qa/accessibility-audit.md)). CodeQL and the first observed CI run of the production-image job are not yet in place (see section 5).
+
 ---
 
 ## 3. User Personas
@@ -73,9 +75,11 @@ Requirement IDs use `REQ-<epic>.<feature>.<seq>`. Epic and feature numbers follo
 
 **Priority mapping.** Sprint 1 and 2 stories are Must Have (core, launch-blocking). Sprint 3 stories are Should Have. Sprint 4 hardening and release stories are Must Have because they gate release. Could Have is unused in v1.
 
-**Implementation status (as of 2026-10-19, end of Sprint 3).** Implemented in code: registration, login, logout, refresh and password reset (REQ-2.2.x, 2.3.x); profile and settings (REQ-2.4.x); wallets (REQ-3.1.x); transfers (REQ-3.2.x); categories (REQ-4.1.x); transaction CRUD, search and the transaction UI (REQ-5.1.x, 5.2.x); CSV export (REQ-5.3.x); budgets and overspend warnings (Epic 6); dashboard and reports (Epic 7); recurring transactions (Epic 8); and the admin area with audit log (Epic 9). Known gaps: audit and recurring-run retention purge jobs, the post-transaction budget toast, and a dedicated worker process are not built. Epic 10 hardening is not started, except that rate limiting, the strict CSP and the ledger triggers already exist as Sprint 2 groundwork (REQ-2.2.9, REQ-2.2.10, REQ-5.1.3). Per-story state is tracked in the project backlog; requirements below are not individually status-tagged.
+**Implementation status (as of 2026-10-19; Epics 1 to 9 implemented, Epic 10 in progress).** Implemented in code: registration, login, logout, refresh and password reset (REQ-2.2.x, 2.3.x); profile and settings (REQ-2.4.x); wallets (REQ-3.1.x); transfers (REQ-3.2.x); categories (REQ-4.1.x); transaction CRUD, search and the transaction UI (REQ-5.1.x, 5.2.x); CSV export (REQ-5.3.x); budgets and overspend warnings (Epic 6); dashboard and reports (Epic 7); recurring transactions (Epic 8); and the admin area with audit log (Epic 9). Known gaps: audit and recurring-run retention purge jobs, the post-transaction budget toast, and a dedicated worker process are not built. Epic 10 hardening is in progress (see the status notes on each Epic 10 requirement below), building on rate limiting, the strict CSP and the ledger triggers that existed as Sprint 2 groundwork (REQ-2.2.9, REQ-2.2.10, REQ-5.1.3). Per-story state is tracked in the project backlog; requirements below are not individually status-tagged.
 
-**Deferred.** Serving the built SPA from the API origin (static-SPA plugin) and a CI job running Playwright against the production build under the real CSP are deferred to the Sprint 4 deployment stories (Epic 10, Feature 10.3). Until then the Compose stack does not serve the SPA and Playwright runs use the Vite dev server.
+**Done in Sprint 4.** The API serves the built SPA from its own origin in the production image, and a CI job runs Playwright against that image under the real CSP. The local Compose stack still uses the Vite dev server for hot reload.
+
+**Epic 10 status (2026-10-19, from the project backlog).** QA gate Done and Pass: E10-F1-S1, E10-F1-S2, E10-F2-S1, E10-F2-S2, E10-F2-S4, E10-F3-S1, E10-F3-S2. Open: E10-F1-S3 and E10-F1-S4 (review outcomes now recorded in the repository; awaiting QA), E10-F2-S3 (automated, keyboard and contrast checks pass; manual screen-reader testing not performed), E10-F3-S3 (API reference and user guide written; awaiting QA), E10-F3-S4 and E10-F3-S5.
 
 ### Epic 1: Foundations (Repository, CI, Docker, Docs)
 
@@ -300,31 +304,33 @@ Requirement IDs use `REQ-<epic>.<feature>.<seq>`. Epic and feature numbers follo
 
 | ID | Requirement | Priority | Notes |
 | --- | --- | --- | --- |
-| REQ-10.1.1 | Rate limits apply to login, register and reset endpoints, return 429 with retry hints, and are configurable and tested. | Must Have | E10-F1-S1 |
-| REQ-10.1.2 | CSP and security headers are set, CORS is restricted by config, and input validation is reviewed on every endpoint. | Must Have | E10-F1-S2 |
-| REQ-10.1.3 | A backend review checks authorization on every endpoint, logs findings and documents a summary; none critical or high remain open. | Must Have | E10-F1-S3 |
-| REQ-10.1.4 | A frontend review confirms no unsafe HTML injection, reviews token storage and tracks findings to closure. | Must Have | E10-F1-S4 |
+| REQ-10.1.1 | Rate limits apply to login, register and reset endpoints, return 429 with retry hints, and are configurable and tested. | Must Have | E10-F1-S1. Status: Done, QA Pass. Per-IP refresh limiter added after review |
+| REQ-10.1.2 | CSP and security headers are set, CORS is restricted by config, and input validation is reviewed on every endpoint. | Must Have | E10-F1-S2. Status: Done, QA Pass. Verified against the production build served by the API |
+| REQ-10.1.3 | A backend review checks authorization on every endpoint, logs findings and documents a summary; none critical or high remain open. | Must Have | E10-F1-S3. Status: In Progress. Outcome recorded in [the backend review](./reviews/sprint-4-backend-security-review.md): no Critical or High findings |
+| REQ-10.1.4 | A frontend review confirms no unsafe HTML injection, reviews token storage and tracks findings to closure. | Must Have | E10-F1-S4. Status: In Progress. Outcome recorded in [the frontend review](./reviews/sprint-4-frontend-review.md): findings fixed, accepted or tracked |
+| REQ-10.1.5 | Guards found necessary in review hold: the readiness probe is cached so `/health` cannot be used to hammer the database, a forged pagination cursor is rejected with `INVALID_CURSOR`, and the server refuses to start in production with rate limiting disabled. | Must Have | E10-F1-S3 review findings M2, L1, L2 |
 
 #### Feature 10.2: Quality Assurance
 
 | ID | Requirement | Priority | Notes |
 | --- | --- | --- | --- |
-| REQ-10.2.1 | Coverage thresholds are met and enforced in CI; every acceptance criterion maps to a test; money and permission logic is tested. | Must Have | E10-F2-S1 |
-| REQ-10.2.2 | E2E tests cover register, wallet, transaction, budget, dashboard, recurring and admin journeys, run in CI against Docker, with flakiness controlled. | Must Have | E10-F2-S2 |
-| REQ-10.2.3 | Automated and manual keyboard and screen-reader checks verify WCAG 2.1 AA in both themes; issues are fixed or tracked. | Must Have | E10-F2-S3 |
-| REQ-10.2.4 | Performance sanity tests use a seeded large dataset for list and reports, document thresholds and report regressions. | Must Have | E10-F2-S4 |
+| REQ-10.2.1 | Coverage thresholds are met and enforced in CI; every acceptance criterion maps to a test; money and permission logic is tested. | Must Have | E10-F2-S1. Status: Done, QA Pass. Thresholds enforced by `pnpm test:coverage` in CI |
+| REQ-10.2.2 | E2E tests cover register, wallet, transaction, budget, dashboard, recurring and admin journeys, run in CI against Docker, with flakiness controlled. | Must Have | E10-F2-S2. Status: Done, QA Pass. 75 Playwright tests pass against the production image (CI mode) |
+| REQ-10.2.3 | Automated and manual keyboard and screen-reader checks verify WCAG 2.1 AA in both themes; issues are fixed or tracked. | Must Have | E10-F2-S3. Status: In Progress. axe, keyboard and contrast checks done; manual screen-reader checks NOT performed ([audit](./qa/accessibility-audit.md)) |
+| REQ-10.2.4 | Performance sanity tests use a seeded large dataset for list and reports, document thresholds and report regressions. | Must Have | E10-F2-S4. Status: Done, QA Pass. [Baseline](./qa/performance-baseline.md) at 100,000 transactions |
 
 #### Feature 10.3: Observability, Deployment and Release
 
 | ID | Requirement | Priority | Notes |
 | --- | --- | --- | --- |
-| REQ-10.3.1 | Request logs carry correlation IDs, a protected metrics endpoint exists, and a runbook covers common failures. | Must Have | E10-F3-S1 |
-| REQ-10.3.2 | A production image builds in CI; a deployment guide covers env vars, migrations, rollback and backup. | Must Have | E10-F3-S2 |
-| REQ-10.3.3 | The OpenAPI document is published and matches the implementation; the user guide covers all features; docs are reviewed for standalone-product tone. | Must Have | E10-F3-S3 |
-| REQ-10.3.4 | The README provides overview, features, screenshots, quickstart, architecture and testing summary, and links to docs and license. | Must Have | E10-F3-S4 |
-| REQ-10.3.5 | A release checklist confirms all stories are Done or documented as deferred, the summary table is final, and a Final Backlog Review section exists. | Must Have | E10-F3-S5 |
+| REQ-10.3.1 | Request logs carry correlation IDs, a protected metrics endpoint exists, and a runbook covers common failures. | Must Have | E10-F3-S1. Status: Done, QA Pass |
+| REQ-10.3.2 | A production image builds in CI; a deployment guide covers env vars, migrations, rollback and backup. | Must Have | E10-F3-S2. Status: Done, QA Pass. Registry publishing is not set up ([deployment guide](./operations/deployment.md)) |
+| REQ-10.3.3 | The OpenAPI document is published and matches the implementation; the user guide covers all features; docs are reviewed for standalone-product tone. | Must Have | E10-F3-S3. Status: In Progress. [API reference](./api/README.md) and [user guide](./user-guide.md) written; the OpenAPI file is committed and checked against the routes by tests |
+| REQ-10.3.6 | Every route the server registers is described in the OpenAPI document, each operation states whether it is implemented or planned, and a test fails when the document and the routes disagree. | Must Have | E10-F3-S3; `apps/api/src/openapi.test.ts` |
+| REQ-10.3.4 | The README provides overview, features, screenshots, quickstart, architecture and testing summary, and links to docs and license. | Must Have | E10-F3-S4. Status: In Progress. Screenshots added (sample data from the fake API) |
+| REQ-10.3.5 | A release checklist confirms all stories are Done or documented as deferred, the summary table is final, and a Final Backlog Review section exists. | Must Have | E10-F3-S5. Status: In Progress. v1.0 is not declared ready |
 
-**Requirement count:** 102 functional requirements across 10 epics and 24 features, covering all 80 stories.
+**Requirement count:** 109 functional requirements across 10 epics and 24 features, covering all 80 stories.
 
 ---
 
@@ -332,19 +338,19 @@ Requirement IDs use `REQ-<epic>.<feature>.<seq>`. Epic and feature numbers follo
 
 | ID | Category | Requirement | Priority | Verification |
 | --- | --- | --- | --- | --- |
-| NFR-P-1 | Performance | Wallet list with balances p95 under 50 ms; transaction list p95 under 200 ms; dashboard aggregations p95 under 300 ms, at 100k transactions for one user. | Must Have | `seed:perf`, autocannon scripts, EXPLAIN checks (E10-F2-S4) |
+| NFR-P-1 | Performance | Wallet list with balances p95 under 50 ms; transaction list p95 under 200 ms; dashboard aggregations p95 under 300 ms, at 100k transactions for one user. | Must Have | `pnpm --filter @midas/api test:perf` and EXPLAIN checks (E10-F2-S4). Result 2026-10-19: met, see the NFR status section below. Concurrent load (autocannon) was not run |
 | NFR-P-2 | Performance | Per-request auth check p95 under 5 ms; admin user search and audit query p95 under 200 ms at 50k users / 5M audit rows; uncached platform metrics under 2 s. | Should Have | Performance suite, query plans |
-| NFR-P-3 | Performance | Initial SPA load LCP under 2.5 s on mid-range mobile; routes code-split; charts and password-strength checker lazy-loaded. | Should Have | Lighthouse or manual check |
+| NFR-P-3 | Performance | Initial SPA load LCP under 2.5 s on mid-range mobile; routes code-split; charts and password-strength checker lazy-loaded. | Should Have | Lighthouse or manual check. NOT verified: whether the large `password-*.js` chunk (about 1.66 MB minified) and the chart chunk load only when needed was not checked, and no bundle-size budget exists |
 | NFR-P-4 | Performance | CSV export streams in constant server memory. | Should Have | Integration test with large dataset |
 | NFR-S-1 | Security | Passwords hashed with argon2id; policy of 12 to 128 characters and a strength score of at least 3. | Must Have | Unit and integration tests |
 | NFR-S-2 | Security | Access token held in memory only; refresh token (`<sid>.<random>`) is an httpOnly, Secure, SameSite=Strict cookie with rotation and reuse detection (implemented in Sprint 2); role checked from the database on every request. | Must Have | Integration tests, frontend review (E10-F1-S4) |
 | NFR-S-3 | Security | Strict tenant isolation: every user-data query is scoped by user; another user's resource returns 404. | Must Have | Route-enumeration and ownership tests |
 | NFR-S-4 | Security | Rate limits on auth, export and write endpoints; CSP, HSTS and security headers; CORS disabled in production. | Must Have | Integration tests (E10-F1-S1, E10-F1-S2) |
-| NFR-S-5 | Security | No secrets in the repository; secret scanning and dependency audit on every PR; CodeQL on schedule and PRs. | Must Have | CI workflows |
+| NFR-S-5 | Security | No secrets in the repository; secret scanning and dependency audit on every PR; CodeQL on schedule and PRs. | Must Have | CI workflows. Secret scanning (gitleaks) and `pnpm audit` run in CI (one dev-only advisory is ignored with a written reason); CodeQL and osv-scanner are planned and NOT yet in place |
 | NFR-S-6 | Security | Admin privacy boundary: no admin endpoint exposes users' financial records; the audit log stores no secrets or amounts. | Must Have | Route-enumeration tests, audit content tests |
 | NFR-S-7 | Security | CSV export neutralizes formula-injection prefixes. | Must Have | Unit tests |
-| NFR-S-8 | Security | The SPA runs under a strict CSP without `unsafe-inline`. Production-build verification under the real CSP is deferred to Sprint 4. | Must Have | CSP e2e job (Sprint 4; TODO: attach to E10 story ID) |
-| NFR-A-1 | Accessibility | WCAG 2.1 AA across all screens in light and dark themes, including contrast and keyboard operation. | Must Have | axe scans plus manual keyboard and screen-reader checklist (E10-F2-S3) |
+| NFR-S-8 | Security | The SPA runs under a strict CSP without `unsafe-inline`, verified against the production build served by the API: `e2e/tests/csp.spec.ts` records zero CSP violations across auth pages, dashboard, charts, dialogs, menus and toasts (28 Playwright tests passed locally with 0 CSP violations at review time; 75 passed against the production image in CI mode at the QA gate). | Must Have | `csp.spec.ts` (E10-F1-S2, E10-F1-S4). The first run of the CI `production-image` job on GitHub has NOT yet been observed |
+| NFR-A-1 | Accessibility | WCAG 2.1 AA across all screens in light and dark themes, including contrast and keyboard operation. | Must Have | axe scans plus manual keyboard and screen-reader checklist (E10-F2-S3). Done: axe (0 violations on 17 routes in light and dark, plus an open dialog and menu), contrast checks, 7 keyboard checks. NOT done: screen-reader testing (NVDA, VoiceOver), zoom and reflow, forced colors. Open defects: A11Y-02 (focus lost after a confirmation from the wallet row menu), A11Y-03 (best-practice `region` rule) |
 | NFR-A-2 | Accessibility | State is never conveyed by color alone (budget status, balances); charts have text or table alternatives; status changes are announced to assistive technology. | Must Have | Design review, component tests, manual checks |
 | NFR-SC-1 | Scalability | Supports about 50k registered users, a few hundred concurrent, about 10k transactions per active user per year on a single instance. | Should Have | Performance suite |
 | NFR-SC-2 | Scalability | Scheduler runs in the web process or a separate worker; concurrent runners are safe. Scaling past one instance requires a shared rate-limit store. | Should Have | Concurrency integration test; deployment guide |
@@ -355,9 +361,43 @@ Requirement IDs use `REQ-<epic>.<feature>.<seq>`. Epic and feature numbers follo
 | NFR-D-2 | Data Integrity | Audit rows are append-only for the application role. | Must Have | Database tests |
 | NFR-D-3 | Data Integrity | Wallet ledger consistency is enforced by database triggers in addition to application code. | Must Have | PostgreSQL 17 integration tests, including concurrent transfers |
 | NFR-M-1 | Maintainability | Coverage gates: shared 95%, core API modules 85%, API overall 80%, web 80%; every acceptance criterion maps to a test. | Must Have | CI coverage gate (E10-F2-S1) |
-| NFR-M-2 | Maintainability | The API contract is the single authority; generated OpenAPI is checked for drift in CI. | Must Have | Contract test |
+| NFR-M-2 | Maintainability | The API contract is the single authority; the committed OpenAPI document is checked for drift against the registered routes and the shared schemas. | Must Have | `openapi.test.ts` and `openapi-shapes.test.ts` (the OpenAPI file is maintained by hand, not generated; see section 6) |
 | NFR-O-1 | Observability | Structured JSON logs with request IDs and sensitive fields redacted; Prometheus metrics behind a token. | Should Have | Integration tests, runbook |
 | NFR-U-1 | Usability | Responsive layouts from mobile to desktop; light and dark themes; English-only UI copy in v1 with locale-aware number and date formatting. | Must Have | Design review, E2E |
+
+### NFR status (2026-10-19)
+
+**Security**
+
+| Item | Status | Evidence |
+| --- | --- | --- |
+| Authorization on every endpoint | Verified: 62 routes enumerated; no Critical or High finding | [Backend security review](./reviews/sprint-4-backend-security-review.md), `route-auth-table.int.test.ts` |
+| NFR-S-8 strict CSP on the production build | Verified against the production build served by the API (`apps/api/src/platform/web.ts`) | `e2e/tests/csp.spec.ts`; [frontend review](./reviews/sprint-4-frontend-review.md) |
+| Dependency audit | `pnpm audit --prod` clean; one dev-only High advisory (GHSA-vfj7-8cjw-p6xm, through `kysely-codegen`) is ignored in `pnpm-workspace.yaml` with a written reason | CI job "Dependency audit" |
+| CodeQL, osv-scanner | Not in place | Planned in [architecture](./architecture.md) |
+| First GitHub run of the `production-image` and coverage CI jobs | Not yet observed | Backlog QA notes |
+
+**Performance** (100,000 transactions for one user, PostgreSQL 17, sequential calls with the API in-process; [baseline](./qa/performance-baseline.md))
+
+| Scenario | p95 | Target p95 |
+| --- | --- | --- |
+| Transaction lists (12 variants) | 14 to 24 ms | 200 ms |
+| Wallets with balances | 9.4 ms | 50 ms |
+| Reports and budgets | 69 ms or less (worst case: trend by month, 68.9 ms) | 300 ms |
+| Dashboard (6 calls at once) | 25 ms | 300 ms |
+| CSV export of all 100,000 rows | 4.7 s total; 9.9 MiB streamed | constant server memory |
+
+Not measured: concurrent load, 50,000 users and 5,000,000 audit rows (admin search and audit queries), network, TLS and proxy, browser bundle size and render time.
+
+**Accessibility** ([audit](./qa/accessibility-audit.md))
+
+| Item | Status |
+| --- | --- |
+| axe-core (WCAG 2.0/2.1 A and AA), 17 routes in light and dark | 0 violations (34 scans), plus an open dialog and an open menu in both themes |
+| Token contrast, both themes | 94 of 94 checks pass |
+| Keyboard checks | 7 of 7 pass (A11Y-02 fixed) |
+| Screen-reader testing (NVDA, VoiceOver) | **NOT performed** |
+| Zoom, reflow, text spacing, forced colors, reduced motion, touch targets, axe at mobile width | Not checked |
 
 ---
 
@@ -368,18 +408,18 @@ Requirement IDs use `REQ-<epic>.<feature>.<seq>`. Epic and feature numbers follo
 | Architecture style | Modular monolith, single deployable | Simple operations and local ACID transactions (ADR-001) |
 | Backend | TypeScript on Node.js 24 LTS, Fastify 5, Zod 4 | One language across the stack, schema-driven validation and OpenAPI (ADR-002) |
 | Frontend | React 19, Vite, TanStack Router and Query, React Hook Form, Tailwind v4, Radix UI, Recharts | Typed URL state for filter-heavy screens, accessible primitives (ADR-003) |
-| Rendering | Client-side SPA served from the API origin | App is private, so no SEO need; no CORS in production (ADR-004). Serving the SPA from the API is deferred to Sprint 4; development uses the Vite dev server |
+| Rendering | Client-side SPA served from the API origin | App is private, so no SEO need; no CORS in production (ADR-004). The production image serves the compiled SPA from the API origin; local development uses the Vite dev server |
 | Package management | pnpm workspaces, Node runtime | Strict dependency isolation for a multi-package repo (ADR-005) |
-| API | Versioned REST, OpenAPI 3.1 generated from shared schemas, RFC 9457 errors | Single source of truth, no drift (ADR-006) |
+| API | Versioned REST, RFC 9457 errors, OpenAPI 3.1 description in `apps/api/openapi/openapi.yaml` | Stable, documented contract (ADR-006). The OpenAPI file is committed and maintained by hand; tests keep it in sync with the registered routes and the shared schemas. ADR-006 describes generation from the shared schemas, which is not implemented (TODO: architect to confirm or amend) |
 | Auth | Argon2id passwords; 10-minute in-memory access JWT; rotating httpOnly refresh cookie | Limits XSS exposure, immediate suspension effect (ADR-007) |
 | Database | PostgreSQL 17, Kysely on `pg`, node-pg-migrate | Constraints, triggers and locking carry money correctness; real up/down migrations (ADR-016, resolved in [database.md](./database.md)) |
 | Money and time | Integer minor units; date-only ledger with per-user timezone | Exact arithmetic, no day-boundary bugs (ADR-009, ADR-017) |
 | Scheduling | In-process scheduler coordinated through the database | No extra infrastructure; idempotent by unique run key (ADR-011) |
 | Email | Mailer port with SMTP, console and memory adapters; Mailpit locally | Provider-agnostic (ADR-010) |
-| Deployment | Single Docker image, managed database, Render Blueprint as reference, GitHub Actions CI | Portable and inexpensive (ADR-014) |
+| Deployment | One production Docker image (target `runtime`): compiled API plus the built SPA, production dependencies only, no `tsx` or dev tooling, runs as the unprivileged `node` user, health check on `/health`; managed PostgreSQL; GitHub Actions CI builds and smoke-tests the image | Portable and inexpensive (ADR-014). Publishing to a registry is not set up; see the [deployment guide](./operations/deployment.md) |
 | Testing | Vitest, Testcontainers, MSW, React Testing Library, Playwright with axe, autocannon | Real database in integration tests (ADR-015) |
 
-**Architecture summary.** One Fastify process hosts all domain modules (auth, users, wallets, categories, transactions, transfers, budgets, reports, recurring, admin, audit) and serves the compiled SPA. A shared package holds the Zod schemas, money helpers, and recurrence and budget math used by both API and web. PostgreSQL is the only datastore. Full detail: [architecture.md](./architecture.md) and [database.md](./database.md).
+**Architecture summary.** One Fastify process hosts all domain modules (auth, users, wallets, categories, transactions, transfers, budgets, reports, recurring, admin, audit) and serves the compiled SPA in the production image (single process, single origin, no CORS). A shared package holds the Zod schemas, money helpers, and recurrence and budget math used by both API and web. PostgreSQL is the only datastore. Full detail: [architecture.md](./architecture.md) and [database.md](./database.md).
 
 ---
 
@@ -387,7 +427,9 @@ Requirement IDs use `REQ-<epic>.<feature>.<seq>`. Epic and feature numbers follo
 
 **Constraints**
 
-- Sprint 2 is complete; Sprints 3 and 4 are not started. Features beyond Sprint 2 are specified but not implemented.
+- Sprints 1 to 3 are implemented and Sprint 4 (hardening and release) is in progress. v1.0 is not declared ready: open gates are manual screen-reader testing, QA sign-off of the review and documentation stories, and the first observed CI run of the production-image job.
+- Rate-limit counters are held per instance; running more than one instance needs a shared store (NFR-SC-2).
+- Behind a reverse proxy, `TRUST_PROXY` must be set to the number of proxies, otherwise every user shares one client address for rate limiting.
 - The strict CSP forbids inline scripts and styles, so UI components must not rely on libraries that inject them (native select and radio controls are used).
 - Public repository; no secrets, personal data or internal references in any committed file.
 - Documentation reads as a standalone product.
@@ -406,6 +448,8 @@ Requirement IDs use `REQ-<epic>.<feature>.<seq>`. Epic and feature numbers follo
 - TODO: audit log retention of 400 days is proposed and still to be confirmed (architecture section 8.5).
 - TODO: the contract has no error code for a wallet balance outside the allowed range (database.md open item 1; architect to resolve).
 - UI copy is English-only; locale affects formatting only.
+- Session ids are treated as semi-sensitive: a forged refresh token that names a live session ends that session (accepted ADR-007 reuse-detection trade-off, review finding L5).
+- Registration reveals whether an email is already registered through `409 EMAIL_TAKEN` (accepted trade-off, limited to 5 registrations per hour per IP, review finding L4).
 
 ---
 
@@ -425,6 +469,14 @@ Requirement IDs use `REQ-<epic>.<feature>.<seq>`. Epic and feature numbers follo
 - Admin "view as user" or any per-user financial statistics.
 - UI localization of copy.
 
+**Planned but not built (status, not exclusions; TODO: owner decision before v1.0 or explicit deferral)**
+
+- Publishing the image to a container registry and a tag-driven release workflow.
+- CodeQL and osv-scanner in CI.
+- Serving the OpenAPI document from the running API and generating it from the shared schemas.
+- Concurrent-load, 50,000-user and 5,000,000-audit-row performance tests.
+- Manual screen-reader testing (NVDA, VoiceOver).
+
 ---
 
 ## 9. Glossary
@@ -440,10 +492,13 @@ Requirement IDs use `REQ-<epic>.<feature>.<seq>`. Epic and feature numbers follo
 | Category | A label classifying a transaction as income or expense; system (admin-managed) or user-owned. |
 | Cursor (keyset) pagination | Pagination using an opaque position token instead of page numbers. |
 | Minor units | Smallest currency unit as an integer (for example cents); the basis for all stored amounts. |
+| OpenAPI | The machine-readable API description in `apps/api/openapi/openapi.yaml`. |
+| Production image | The single Docker image that contains the compiled API and the built web app. |
 | Problem Details | RFC 9457 error response format with stable machine codes. |
 | Recurring template | A schedule that automatically generates income or expense transactions. |
 | Refresh token | Long-lived rotating credential in an httpOnly cookie, used to obtain new access tokens. Format `<sid>.<random>`. |
 | Reuse detection | Revoking a session when an already-rotated refresh token is presented again, indicating possible theft. |
+| CSP | Content Security Policy: the response header that restricts what the browser may load and run. Midas forbids inline scripts and styles. |
 | Composer | The transaction create/edit overlay, opened through the `?compose=` or `?tx=` URL parameters. |
 | toAmountMinor | The explicit destination amount, in minor units, required for cross-currency transfers (ADR-008). |
 | Retired category | A system category no longer selectable for new data but still shown on existing transactions. |
@@ -462,3 +517,4 @@ Requirement IDs use `REQ-<epic>.<feature>.<seq>`. Epic and feature numbers follo
 | 1.0 | 2026-10-16 | docs-agent | Initial specification derived from the project brief, architecture, API contract, database design, UI design and dev stories tracker. |
 | 1.1 | 2026-10-18 | docs-agent | Sprint 2 update. Added implementation status and deferral notes to section 4. Added REQ-2.2.8 to 2.2.10, REQ-5.1.3, REQ-5.2.7; clarified REQ-2.2.4, 3.2.3, 5.2.3. Added NFR-S-8 and NFR-D-3; updated NFR-S-2. Recorded Sprint 2 decisions (ADR-008 explicit toAmountMinor, `<sid>.<random>` refresh token, native controls under strict CSP, single-currency amount filter, URL-driven composer). Deferred SPA-from-API and CSP e2e to Sprint 4. Updated constraints, rendering note and glossary. |
 | 1.2 | 2026-10-19 | docs-agent | Sprint 3 update. Implementation status now covers CSV export, budgets, dashboard and reports, recurring transactions and admin; known gaps listed. |
+| 1.3 | 2026-10-19 | docs-agent | Sprint 4 update. Epic 10 status recorded per requirement; added REQ-10.1.5 and REQ-10.3.6 (requirement count corrected to 109). NFR-S-8 verified against the production build served by the API; added an NFR status section (security, performance baseline at 100k transactions, accessibility with screen-reader testing recorded as NOT performed). Tech stack: single production image (compiled, non-root, production dependencies only) serving API and SPA; OpenAPI recorded as committed and test-checked rather than generated. Constraints, assumptions (accepted review trade-offs) and out-of-scope (planned but not built) updated; glossary extended. Linked the review records, API reference and user guide. |

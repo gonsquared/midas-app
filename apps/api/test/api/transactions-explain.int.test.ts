@@ -67,7 +67,15 @@ describeDb('transaction list query plans (EXPLAIN, real PostgreSQL)', () => {
     } finally {
       seed.release();
     }
-    await ctx.owner.query('analyze transactions');
+    // Full-table statistics (300 x 1000 rows covers the 60k rows) so the asserted plans do not
+    // depend on the random ANALYZE sample.
+    const stats = await ctx.owner.connect();
+    try {
+      await stats.query('set default_statistics_target = 1000');
+      await stats.query('analyze transactions');
+    } finally {
+      stats.release();
+    }
     const row = await ctx.owner.query(
       `select occurred_on::text as d, created_at, id from transactions
         where user_id = $1 order by occurred_on desc, created_at desc, id desc offset 50 limit 1`,

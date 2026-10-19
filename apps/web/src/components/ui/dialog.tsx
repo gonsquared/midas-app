@@ -1,7 +1,8 @@
 import * as RadixDialog from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
-import { useEffect, type ComponentProps, type ReactNode } from 'react';
+import { useEffect, useRef, type ComponentProps, type ReactNode, type RefObject } from 'react';
 import { cn } from '@/lib/cn';
+import { resolveOpener } from '@/lib/use-return-focus';
 import { IconButton } from './icon-button';
 
 /**
@@ -10,7 +11,9 @@ import { IconButton } from './icon-button';
  * Instead the Dialog runs in Radix's non-modal mode (no RemoveScroll) and this file supplies the
  * modal pieces itself: a scrim that swallows outside pointer events (and dismisses), aria-modal,
  * a body class for the scroll lock (styled in index.css, so no injected CSS), Tab looping, Esc
- * and focus return, which Radix keeps in non-modal mode. See CONTRIBUTING.md (CSP).
+ * and focus return, which Radix keeps in non-modal mode, and the `inert` attribute on everything
+ * behind the dialog (what the modal mode's aria-hidden would do for assistive technology). See
+ * CONTRIBUTING.md (CSP).
  */
 export function Dialog(props: Omit<ComponentProps<typeof RadixDialog.Root>, 'modal'>) {
   return <RadixDialog.Root {...props} modal={false} />;
@@ -31,6 +34,57 @@ function ScrollLock(): null {
       if (scrollLocks === 0) document.body.classList.remove(SCROLL_LOCK_CLASS);
     };
   }, []);
+  return null;
+}
+
+/** How many open dialogs currently hold each background element inert. */
+const inertHolds = new Map<Element, number>();
+/** Elements that were already inert before any dialog touched them: never un-inerted by us. */
+const ownInert = new Set<Element>();
+
+/** The direct child of <body> that contains the node (the Radix portal wrapper). */
+function bodyChildOf(node: Element): Element | null {
+  let current: Element | null = node;
+  while (current && current.parentElement !== document.body) current = current.parentElement;
+  return current;
+}
+
+/**
+ * Makes everything outside this dialog's portal inert, so the background leaves the accessibility
+ * tree and the tab order. Reference counted: stacked dialogs inert each other's layers, and the
+ * background comes back only when the last dialog closes. Needs no CSS, so it is CSP-safe.
+ */
+function InertBackground({ contentRef }: { contentRef: RefObject<HTMLElement | null> }): null {
+  useEffect(() => {
+    const content = contentRef.current;
+    const ownRoot = content ? bodyChildOf(content) : null;
+    const held: Element[] = [];
+    for (const element of Array.from(document.body.children)) {
+      if (element === ownRoot || element.tagName === 'SCRIPT') continue;
+      const holds = inertHolds.get(element) ?? 0;
+      if (holds === 0) {
+        if (element.hasAttribute('inert')) continue;
+        element.setAttribute('inert', '');
+        ownInert.add(element);
+      } else if (!ownInert.has(element)) {
+        continue;
+      }
+      inertHolds.set(element, holds + 1);
+      held.push(element);
+    }
+    return () => {
+      for (const element of held) {
+        const holds = (inertHolds.get(element) ?? 1) - 1;
+        if (holds > 0) {
+          inertHolds.set(element, holds);
+          continue;
+        }
+        inertHolds.delete(element);
+        ownInert.delete(element);
+        element.removeAttribute('inert');
+      }
+    };
+  }, [contentRef]);
   return null;
 }
 
@@ -92,9 +146,12 @@ export function DialogContent({
   titleHidden = false,
   describedBy,
 }: DialogContentProps) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
   return (
     <RadixDialog.Portal>
       <ScrollLock />
+      <InertBackground contentRef={contentRef} />
       {/* Non-modal Radix renders no overlay, so this is the scrim. Pointer-down on it counts as
           outside the content and closes the dialog, like the modal version. */}
       <div
@@ -103,6 +160,7 @@ export function DialogContent({
         className="fixed inset-0 z-60 animate-fade-in bg-scrim"
       />
       <RadixDialog.Content
+        ref={contentRef}
         aria-modal="true"
         onFocusOutside={ignoreNestedLayers}
         onInteractOutside={ignoreNestedLayers}
@@ -112,8 +170,27 @@ export function DialogContent({
           : description
             ? {}
             : { 'aria-describedby': undefined })}
-        {...(onOpenAutoFocus ? { onOpenAutoFocus } : {})}
-        {...(onCloseAutoFocus ? { onCloseAutoFocus } : {})}
+        onOpenAutoFocus={(event) => {
+          // Remember what had focus before the dialog took it (see onCloseAutoFocus).
+          opener.current = resolveOpener(document.activeElement);
+          onOpenAutoFocus?.(event);
+        }}
+        onCloseAutoFocus={(event) => {
+          onCloseAutoFocus?.(event);
+          if (event.defaultPrevented) return;
+          // Non-modal Radix only restores focus to a <Dialog.Trigger>. Dialogs opened from a
+          // route link or from state have none, so focus would fall to <body> (WCAG 2.4.3).
+          // Callers with their own handling (useReturnFocus) call preventDefault and win.
+          event.preventDefault();
+          // Only when focus was actually lost: if something else already took it (a second dialog
+          // opened from this one, a route change that focused the heading) leave it alone.
+          const active = document.activeElement;
+          if (active && active !== document.body) return;
+          const target = opener.current;
+          if (!target || target === document.body) return;
+          if (target.isConnected) target.focus();
+          else document.querySelector<HTMLElement>('main h1')?.focus();
+        }}
         className={cn(
           'fixed z-60 flex flex-col gap-4 overflow-y-auto border border-line bg-raised p-5 text-ink shadow-dialog',
           VARIANT_CLASSES[variant],

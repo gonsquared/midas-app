@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ConfigError, loadConfig, loadMigrationConnection } from './config.js';
 
@@ -106,6 +107,22 @@ describe('loadConfig', () => {
       /DATABASE_SSL=require/,
     );
     expect(loadConfig({ ...base, DATABASE_SSL: 'verify-full' }).warnings).toEqual([]);
+  });
+
+  it('refuses to disable rate limiting in production but allows it elsewhere', () => {
+    const prod = {
+      ...base,
+      NODE_ENV: 'production',
+      APP_BASE_URL: PROD_URL,
+      MAIL_TRANSPORT: 'smtp',
+    };
+    expect(() => loadConfig({ ...prod, RATE_LIMIT_ENABLED: 'false' })).toThrow(
+      /RATE_LIMIT_ENABLED: "false" is not allowed in production/,
+    );
+    expect(loadConfig({ ...prod, RATE_LIMIT_ENABLED: 'true' }).rateLimit.enabled).toBe(true);
+    expect(
+      loadConfig({ ...base, NODE_ENV: 'test', RATE_LIMIT_ENABLED: 'false' }).rateLimit.enabled,
+    ).toBe(false);
   });
 
   it('parses boolean flags', () => {
@@ -233,5 +250,20 @@ describe('loadConfig: mail, CORS and per-endpoint rate limits', () => {
       loadConfig({ ...base, RATE_LIMIT_LOGIN_ACCOUNT_MAX: '7', RATE_LIMIT_STORE_MAX_KEYS: '999' })
         .rateLimit,
     ).toMatchObject({ loginAccountMax: 7, maxKeys: 999 });
+  });
+});
+
+describe('loadConfig WEB_DIST_DIR', () => {
+  it('defaults to the sibling apps/web/dist, resolved from the working directory', () => {
+    expect(loadConfig(base).web.distDir).toBe(path.resolve(process.cwd(), '../web/dist'));
+  });
+
+  it('resolves an explicit path to an absolute one and treats empty as unset', () => {
+    expect(loadConfig({ ...base, WEB_DIST_DIR: '/srv/midas/web' }).web.distDir).toBe(
+      path.resolve('/srv/midas/web'),
+    );
+    expect(loadConfig({ ...base, WEB_DIST_DIR: '' }).web.distDir).toBe(
+      path.resolve(process.cwd(), '../web/dist'),
+    );
   });
 });

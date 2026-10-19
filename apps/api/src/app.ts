@@ -58,6 +58,7 @@ import { serializeError, serializeRequest } from './platform/logging.js';
 import { createMailer, type Mailer } from './platform/mailer/mailer.js';
 import { MetricsRegistry } from './platform/metrics.js';
 import { createLimiter, ipKey } from './platform/rate-limit.js';
+import { registerWebApp, type WebApp } from './platform/web.js';
 
 /** Accepted inbound request id format (api-contract 1.6). */
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9-]{8,64}$/;
@@ -150,6 +151,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     // Audit rows use this server-generated id, never the client-supplied X-Request-Id.
     request.serverRequestId = randomUUID();
     request.log = request.log.child({ serverRequestId: request.serverRequestId });
+    // The "request completed" line is written through reply.log, so give it the same bindings.
+    reply.log = request.log;
     reply.header('X-Request-Id', request.id);
     // API responses carry personal financial data and tokens: never cache them.
     if (isApiRequest(request)) reply.header('Cache-Control', 'no-store');
@@ -262,8 +265,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       );
   });
 
-  app.setNotFoundHandler((request, reply) =>
-    reply
+  // Set below once the SPA is registered; client-side routes fall back to index.html.
+  const web: { app?: WebApp } = {};
+  app.setNotFoundHandler((request, reply) => {
+    if (web.app?.fallback(request, reply)) return reply;
+    return reply
       .code(404)
       .type(PROBLEM_JSON)
       .send(
@@ -273,8 +279,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
           instance: request.url.split('?')[0] ?? request.url,
           requestId: request.id,
         }),
-      ),
-  );
+      );
+  });
 
   healthRoutes(app, {
     version: config.appVersion,
@@ -410,6 +416,9 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       auditRoutes(adminScope, audit);
     });
   });
+
+  // The built SPA, same origin (ADR-004). Registered last so no static route can shadow the API.
+  web.app = await registerWebApp(app, config.web.distDir);
 
   return app;
 }

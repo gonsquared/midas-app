@@ -1,7 +1,7 @@
 import type { AuthSession } from '@midas/shared';
 import { api } from '@/lib/api-client';
 import { authSessionParser } from '@/lib/api-schemas';
-import { clearSession, setSession } from '@/lib/session';
+import { clearSession, isSignedOutByUser, markSignedOutByUser, setSession } from '@/lib/session';
 import { broadcastSignOut } from './session-broadcast';
 
 export async function login(email: string, password: string): Promise<AuthSession> {
@@ -42,18 +42,27 @@ export async function register(input: RegisterInput): Promise<AuthSession> {
   return session;
 }
 
-/** Always clears local state, even if the network call fails. */
+/**
+ * Always clears local state, even if the network call fails (the error is still thrown so the
+ * caller can say the server session may remain). The signed-out flag stops session restore from
+ * using a still-valid refresh cookie until the user signs in again.
+ */
 export async function logout(): Promise<void> {
   try {
     await api.request('/auth/logout', { method: 'POST', auth: false, csrf: true });
   } finally {
+    markSignedOutByUser();
     clearSession();
     broadcastSignOut();
   }
 }
 
-/** Restores a session from the httpOnly refresh cookie (page reload). Null means signed out. */
-export function restoreSession(): Promise<AuthSession | null> {
+/**
+ * Restores a session from the httpOnly refresh cookie (page reload). Null means signed out, which
+ * is also the answer after an explicit sign-out in this page's lifetime.
+ */
+export async function restoreSession(): Promise<AuthSession | null> {
+  if (isSignedOutByUser()) return null;
   return api.refresh();
 }
 

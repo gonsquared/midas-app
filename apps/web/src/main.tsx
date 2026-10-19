@@ -1,10 +1,11 @@
+import '@midas/shared/zod-config';
 import { RouterProvider } from '@tanstack/react-router';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ErrorBoundary } from '@/app/error-boundary';
 import { AppProviders } from '@/app/providers';
 import { createAppRouter } from '@/app/router';
-import { setSessionExpiredHandler } from '@/lib/api-client';
+import { setSessionExpiredHandler, setSessionUserChangedHandler } from '@/lib/api-client';
 import { DEFAULT_RETURN_PATH, safeReturnPath } from '@/lib/redirect';
 import { createQueryClient } from '@/lib/query-client';
 import './styles/index.css';
@@ -22,6 +23,12 @@ setSessionExpiredHandler(() => {
     search:
       back === DEFAULT_RETURN_PATH ? { reason: 'expired' } : { reason: 'expired', redirect: back },
   });
+});
+
+// A refresh handed back a different user: drop everything cached for the previous one.
+setSessionUserChangedHandler(() => {
+  queryClient.clear();
+  void router.navigate({ to: '/dashboard' });
 });
 
 const container = document.getElementById('root');

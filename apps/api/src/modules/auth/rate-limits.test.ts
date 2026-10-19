@@ -144,6 +144,18 @@ describe('refresh rate limit', () => {
     expect((await refresh(app, undefined, '198.51.100.9')).statusCode).toBe(429);
     expect((await refresh(app, undefined, '198.51.100.10')).statusCode).toBe(401);
   });
+
+  it('caps rotating forged session ids per IP and sends Retry-After', async () => {
+    const { app } = await build({ RATE_LIMIT_REFRESH_MAX: '2', RATE_LIMIT_REFRESH_IP_MAX: '5' });
+    const sid = (i: number) => `0199c6a8-0000-7000-8000-${String(i).padStart(12, '0')}`;
+    for (let i = 0; i < 5; i++) {
+      expect((await refresh(app, token(sid(i)), '198.51.100.20')).statusCode).toBe(401);
+    }
+    const limited = await refresh(app, token(sid(99)), '198.51.100.20');
+    expect(limited.statusCode).toBe(429);
+    expect(limited.headers['retry-after']).toBeDefined();
+    expect((await refresh(app, token(sid(100)), '198.51.100.21')).statusCode).toBe(401);
+  });
 });
 
 describe('API detection does not depend on the raw URL', () => {

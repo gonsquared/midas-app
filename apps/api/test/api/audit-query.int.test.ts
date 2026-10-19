@@ -1,5 +1,6 @@
 import { AuditLogPageSchema, type AuditLogPage } from '@midas/shared';
 import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
+import { auditFilterHash } from '../../src/modules/audit/cursor.js';
 import { createIntegrationContext, type IntegrationContext } from '../support/api.js';
 import { adminHelpers } from '../support/admin.js';
 import { describeDb, truncateAll } from '../support/db.js';
@@ -104,6 +105,19 @@ describeDb('audit log query API (real PostgreSQL, E9-F1-S2)', () => {
     expect((await call('GET', '/api/v1/admin/audit-logs?cursor=garbage', boss)).statusCode).toBe(
       400,
     );
+  });
+
+  it('rejects a cursor with a timestamp outside years 1900-2100', async () => {
+    const boss = await admin();
+    const id = '0199c6a8-0000-7000-8000-00000000000a';
+    for (const at of ['0000-01-01T00:00:00.000Z', '2101-01-01T00:00:00.000Z']) {
+      const cursor = Buffer.from(
+        JSON.stringify({ v: 1, f: auditFilterHash({}), k: [at, id] }),
+      ).toString('base64url');
+      const res = await call('GET', `/api/v1/admin/audit-logs?cursor=${cursor}`, boss);
+      expect(res.statusCode).toBe(400);
+      expect(code(res)).toBe('INVALID_CURSOR');
+    }
   });
 
   it('validates parameters', async () => {

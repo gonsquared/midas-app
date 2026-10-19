@@ -17,7 +17,10 @@ export function serializeError(error: unknown): SerializedError {
   if (isPgError(error)) {
     const e = error as unknown as Record<string, unknown>;
     const out: SerializedError = { type: 'DatabaseError', message: '', stack: '' };
+    // SQLSTATE class 22 (data exception) messages quote the offending input value.
+    const dataException = typeof e.code === 'string' && e.code.startsWith('22');
     for (const key of ['code', 'constraint', 'table', 'column', 'routine', 'message']) {
+      if (key === 'message' && dataException) continue;
       if (typeof e[key] === 'string') out[key] = e[key];
     }
     return out;

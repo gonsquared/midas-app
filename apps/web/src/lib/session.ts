@@ -26,7 +26,27 @@ export function getSessionSnapshot(): SessionSnapshot {
   return snapshot;
 }
 
+/**
+ * Set when the user chose to sign out. The refresh cookie may still be valid (the revoke call can
+ * fail), so session restore must not quietly sign them back in until they sign in again.
+ */
+let signedOutByUser = false;
+
+export function markSignedOutByUser(): void {
+  signedOutByUser = true;
+}
+
+/** Lets session restore run again (a successful sign-in does this itself; tests use it too). */
+export function resetSignedOutByUser(): void {
+  signedOutByUser = false;
+}
+
+export function isSignedOutByUser(): boolean {
+  return signedOutByUser;
+}
+
 export function setSession(session: AuthSession): void {
+  signedOutByUser = false;
   accessToken = session.accessToken;
   snapshot = { user: session.user };
   emit();
@@ -58,6 +78,13 @@ export interface SessionStore {
   getAccessToken: () => string | null;
   setSession: (session: AuthSession) => void;
   clearSession: () => void;
+  /** Id of the signed-in user, when known (used to detect a user switch on refresh). */
+  getUserId?: () => string | null;
 }
 
-export const defaultSessionStore: SessionStore = { getAccessToken, setSession, clearSession };
+export const defaultSessionStore: SessionStore = {
+  getAccessToken,
+  setSession,
+  clearSession,
+  getUserId: () => snapshot.user?.id ?? null,
+};

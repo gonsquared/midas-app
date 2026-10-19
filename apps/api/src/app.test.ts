@@ -11,6 +11,30 @@ afterEach(async () => {
 });
 
 describe('GET /health', () => {
+  it('shares one database probe between concurrent /health calls and caches it briefly', async () => {
+    let probes = 0;
+    let now = Date.parse('2026-01-01T00:00:00Z');
+    app = await buildTestApp({
+      clock: { now: () => new Date(now) },
+      checkDatabase: async () => {
+        probes += 1;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return true;
+      },
+    });
+    const built = app;
+    const calls = await Promise.all(
+      Array.from({ length: 10 }, () => built.inject({ method: 'GET', url: '/health' })),
+    );
+    expect(calls.map((r) => r.statusCode)).toEqual(Array<number>(10).fill(200));
+    expect(probes).toBe(1);
+    await app.inject({ method: 'GET', url: '/health' });
+    expect(probes).toBe(1);
+    now += 2500;
+    await app.inject({ method: 'GET', url: '/health' });
+    expect(probes).toBe(2);
+  });
+
   it('reports ok with database up', async () => {
     app = await buildTestApp({ checkDatabase: async () => true });
     const res = await app.inject({ method: 'GET', url: '/health' });

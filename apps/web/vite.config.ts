@@ -44,6 +44,18 @@ export default defineConfig(({ command, mode }) => {
       sourcemap: false,
       // Keep the CSP strict: never inline assets as data: URIs into scripts or styles.
       assetsInlineLimit: 0,
+      rolldownOptions: {
+        output: {
+          advancedChunks: {
+            // Zod and its jitless config share one chunk, which evaluates completely before any
+            // chunk that builds a schema. Otherwise Zod's `new Function` probe runs first and
+            // raises a CSP violation (see packages/shared/src/zod-config.ts).
+            groups: [
+              { name: 'zod', test: /node_modules[/\\]zod[/\\]|shared[/\\]src[/\\]zod-config/ },
+            ],
+          },
+        },
+      },
     },
     test: {
       environment: 'jsdom',
@@ -52,6 +64,16 @@ export default defineConfig(({ command, mode }) => {
       include: ['src/**/*.test.{ts,tsx}'],
       css: false,
       testTimeout: 20_000,
+      // `pnpm --filter @midas/web test:coverage` (CI runs it). Architecture gate: 80% lines overall (section 11).
+      // Floors sit a few points under the measured values (2026-10-19: 88.2% lines, 86.7% statements,
+      // 78.1% branches, 83.4% functions) so a real drop fails without flaking on small edits.
+      coverage: {
+        provider: 'v8',
+        include: ['src/**/*.{ts,tsx}'],
+        exclude: ['src/**/*.test.{ts,tsx}', 'src/test/**', 'src/vite-env.d.ts', 'src/main.tsx'],
+        reporter: ['text-summary', 'json-summary'],
+        thresholds: { lines: 85, statements: 83, branches: 74, functions: 80 },
+      },
     },
   };
 });

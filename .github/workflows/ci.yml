@@ -63,11 +63,14 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Unit and integration tests
+      # The same suites as `pnpm test`, run with V8 coverage. Thresholds are in each package's Vitest
+      # config (shared: 95% lines; api and web: floors under the measured values, architecture
+      # section 11); a drop below one fails this step.
+      - name: Unit and integration tests with coverage thresholds
         shell: bash
         run: |
           set -o pipefail
-          pnpm test 2>&1 | tee "${RUNNER_TEMP}/test.log"
+          pnpm test:coverage 2>&1 | tee "${RUNNER_TEMP}/test.log"
           # The database tests skip (with this marker) when no database is reachable. In CI they
           # must run, so a skip is a failure.
           if grep -q '\[db-tests\] SKIPPED' "${RUNNER_TEMP}/test.log"; then
@@ -156,16 +159,33 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # All dependencies are audited: the runtime image ships devDependencies and runs through tsx.
+      # All dependencies are audited, dev tooling included (the runtime image has production ones only).
       # The one accepted advisory (braces via kysely-codegen, dev-time only) is an explicit,
       # commented ignore in pnpm-workspace.yaml (auditConfig.ignoreGhsas).
       - name: Audit dependencies
         run: pnpm audit --audit-level=high
 
-  docker-build:
-    name: Docker image build (no push)
+  production-image:
+    name: Production image (build, smoke test, Playwright under the real CSP)
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-not-a-secret # throwaway, CI-only; allowlisted in .gitleaks.toml
+          POSTGRES_DB: midas
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d midas"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      IMAGE: midas:ci
+      BASE_URL: http://localhost:3000
     steps:
       - name: Check out
         uses: actions/checkout@v7
@@ -175,16 +195,126 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Build runtime image
+      # `load: true` puts the image in the local Docker daemon so the next steps can run it.
+      - name: Build the runtime image (no push)
         uses: docker/build-push-action@v7
         with:
           context: .
           file: infra/docker/Dockerfile
           target: runtime
           push: false
+          load: true
           tags: midas:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Check the image contents (non-root, no secrets, no dev tooling)
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ "$(docker run --rm --entrypoint id "$IMAGE" -u)" != "0" ] || { echo '::error::Image runs as root.'; exit 1; }
+          docker run --rm --entrypoint sh "$IMAGE" -c '
+            for f in /app/.env /app/.env.example; do
+              if [ -e "$f" ]; then echo "::error::$f is baked into the image."; exit 1; fi
+            done
+            if [ -e /app/node_modules/.bin/tsx ] || [ -d /app/node_modules/vitest ]; then
+              echo "::error::Dev dependencies are in the runtime image."; exit 1
+            fi
+            test -f /app/dist/server.js && test -f /app/dist/cli.js && test -f /app/web/index.html
+          '
+
+      # NODE_ENV=development only because the CI database has no TLS (production requires
+      # DATABASE_SSL=verify-full or require) and the console mailer lets the reset-password spec read
+      # its link from the log. The CSP, security headers and static serving are identical in
+      # production (only HSTS differs). RATE_LIMIT_REGISTER_MAX is raised because the real-API specs
+      # register several accounts from one IP.
+      - name: Migrate, seed and start the API from the image
+        shell: bash
+        run: |
+          set -euo pipefail
+          JWT_ACCESS_SECRET="$(openssl rand -base64 48)"
+          echo "::add-mask::$JWT_ACCESS_SECRET"
+          COMMON=(
+            --network host
+            -e NODE_ENV=development
+            -e DATABASE_URL=postgres://postgres:ci-not-a-secret@localhost:5432/midas
+            -e JWT_ACCESS_SECRET="$JWT_ACCESS_SECRET"
+            -e APP_BASE_URL="$BASE_URL"
+            -e MAIL_TRANSPORT=console
+            -e RATE_LIMIT_REGISTER_MAX=1000
+          )
+          docker run --rm "${COMMON[@]}" "$IMAGE" sh -c 'node dist/cli.js migrate && node dist/cli.js seed:system'
+          docker run -d --name midas "${COMMON[@]}" "$IMAGE"
+          nohup docker logs -f midas > "${RUNNER_TEMP}/api.log" 2>&1 &
+
+      - name: Smoke test /health, the SPA and the API 404
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            if curl -fsS "$BASE_URL/health" > /dev/null; then break; fi
+            sleep 2
+          done
+          health="$(curl -fsS "$BASE_URL/health")"
+          echo "$health"
+          grep -q '"status":"ok"' <<< "$health"
+          # Browser navigation to a client route returns index.html with the CSP and no-cache.
+          curl -sS -D "${RUNNER_TEMP}/spa.headers" -H 'Accept: text/html' -o "${RUNNER_TEMP}/spa.html" "$BASE_URL/wallets"
+          head -1 "${RUNNER_TEMP}/spa.headers" | grep -q ' 200'
+          grep -qi '^content-security-policy: .*script-src .self.' "${RUNNER_TEMP}/spa.headers"
+          grep -qi '^cache-control: no-cache' "${RUNNER_TEMP}/spa.headers"
+          grep -q '<div id="root">' "${RUNNER_TEMP}/spa.html"
+          # An unknown API path is the JSON problem, never index.html.
+          code="$(curl -sS -o "${RUNNER_TEMP}/api404.json" -w '%{http_code}' -H 'Accept: text/html' "$BASE_URL/api/v1/nope")"
+          [ "$code" = 404 ]
+          grep -q '"code":"NOT_FOUND"' "${RUNNER_TEMP}/api404.json"
+          # The container healthcheck defined in the Dockerfile reports healthy.
+          for i in $(seq 1 30); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' midas)" = healthy ] && exit 0
+            sleep 3
+          done
+          echo '::error::The container did not become healthy.'; exit 1
+
+      - name: Set up pnpm (version from packageManager)
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node.js (version from .nvmrc)
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter @midas/e2e exec playwright install --with-deps chromium
+
+      # The whole suite against the API-served production build. E2E_BASE_URL means no Vite server.
+      # E2E_SERVED_BUILD makes every test fail on any securitypolicyviolation (the CSP header is the
+      # server's own) and enables e2e/tests/csp.spec.ts. E2E_REAL_API enables the real-API specs,
+      # which run against the container and PostgreSQL above.
+      - name: Run Playwright
+        env:
+          CI: 'true'
+          E2E_BASE_URL: ${{ env.BASE_URL }}
+          E2E_SERVED_BUILD: '1'
+          E2E_REAL_API: '1'
+        run: |
+          export E2E_MAIL_LOG="${RUNNER_TEMP}/api.log"
+          pnpm test:e2e
+
+      - name: Show API logs
+        if: failure()
+        run: docker logs midas --tail 200 || true
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-production-image
+          path: e2e/playwright-report
+          retention-days: 7
 
   e2e:
     name: Browser tests (Playwright, fake API)

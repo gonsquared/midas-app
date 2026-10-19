@@ -26,6 +26,22 @@ describe('serializeError', () => {
     });
   });
 
+  it('omits the message of SQLSTATE class 22 errors, which quote the input value', () => {
+    const error = Object.assign(new Error('invalid input syntax for type uuid: "secret-value"'), {
+      code: '22P02',
+      routine: 'string_to_uuid',
+    });
+    const out = serializeError(error);
+    expect(out).toEqual({
+      type: 'DatabaseError',
+      code: '22P02',
+      routine: 'string_to_uuid',
+      message: '',
+      stack: '',
+    });
+    expect(JSON.stringify(out)).not.toContain('secret-value');
+  });
+
   it('serialises ordinary errors and non-errors', () => {
     expect(serializeError(new TypeError('bad'))).toMatchObject({
       type: 'TypeError',

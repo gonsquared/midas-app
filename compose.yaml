@@ -1,5 +1,7 @@
 # Local development stack with hot reload: PostgreSQL 17, Mailpit, the Midas API (tsx watch) and
-# the web app (Vite dev server).
+# the web app (Vite dev server). It builds the `dev` stage of the Dockerfile (dev dependencies, tsx).
+# The production image (`runtime` stage) is different: compiled JavaScript, and the API itself serves
+# the built SPA from the same origin. This stack does not use it; see docs/operations/deployment.md.
 #
 #   cp .env.example .env        # then replace every change-me-* placeholder
 #   docker compose up --build   # db -> migrate (one-shot) -> api + web
@@ -20,7 +22,7 @@ x-midas-image: &midas-image
   build:
     context: .
     dockerfile: infra/docker/Dockerfile
-    target: runtime
+    target: dev
   image: midas-local:dev
 
 x-midas-app: &midas-app

@@ -9,6 +9,8 @@ export const authStrings = {
   reasons: {
     expired: 'You were signed out. Sign in to continue.',
     'signed-out': 'You have signed out.',
+    'signout-failed':
+      'You are signed out on this device, but we could not reach the server to end your session. If this is a shared device, try signing in and out again.',
     reset: 'Password updated. Sign in with your new password.',
   },
   registerTitle: 'Create account',

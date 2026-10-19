@@ -1,4 +1,4 @@
-import { createRef } from 'react';
+import { createRef, useState } from 'react';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { axe } from 'vitest-axe';
@@ -148,6 +148,32 @@ describe('Dialog', () => {
     expect(trigger).toHaveFocus();
   });
 
+  it('returns focus to the opener when it has no trigger (opened from state or a route)', async () => {
+    // E10-F2-S3 (A11Y-01): non-modal Radix only restores focus to a <Dialog.Trigger>.
+    function Controlled() {
+      const [open, setOpen] = useState(false);
+      return (
+        <main>
+          <h1 tabIndex={-1}>Page</h1>
+          <Button onClick={() => setOpen(true)}>Open from state</Button>
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogContent title="Controlled">
+              <Button>Inside</Button>
+            </DialogContent>
+          </Dialog>
+        </main>
+      );
+    }
+    const user = userEvent.setup();
+    render(<Controlled />);
+    const opener = screen.getByRole('button', { name: 'Open from state' });
+    await user.click(opener);
+    await screen.findByRole('dialog', { name: 'Controlled' });
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(opener).toHaveFocus());
+  });
+
   it('keeps Tab focus inside the dialog', async () => {
     const user = userEvent.setup();
     render(<Demo />);
@@ -157,6 +183,88 @@ describe('Dialog', () => {
       await user.tab();
       expect(dialog).toContainElement(document.activeElement as HTMLElement);
     }
+  });
+});
+
+describe('Dialog makes the background inert', () => {
+  function Stack() {
+    return (
+      <>
+        <header>
+          <nav aria-label="Main">nav</nav>
+        </header>
+        <main>
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button>Open first</Button>
+            </DialogTrigger>
+            <DialogContent title="First">
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button>Open second</Button>
+                </DialogTrigger>
+                <DialogContent title="Second" role="alertdialog">
+                  <Button>Inside second</Button>
+                </DialogContent>
+              </Dialog>
+            </DialogContent>
+          </Dialog>
+        </main>
+      </>
+    );
+  }
+
+  const appRoot = () => screen.getByRole('main').closest('body > *') as HTMLElement;
+
+  it('inerts the app root while open, keeps the dialog live, and restores it on close', async () => {
+    const user = userEvent.setup();
+    render(<Stack />);
+    const root = appRoot();
+    expect(root).not.toHaveAttribute('inert');
+    await user.click(screen.getByRole('button', { name: 'Open first' }));
+    const dialog = await screen.findByRole('dialog', { name: 'First' });
+    expect(root).toHaveAttribute('inert');
+    expect(dialog.closest('body > *')).not.toHaveAttribute('inert');
+    // Browsers drop inert content from the accessibility tree and tab order (jsdom does not
+    // model that, so assert the attribute on the landmarks' ancestor).
+    expect(screen.getByLabelText('Main').closest('[inert]')).toBe(root);
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(root).not.toHaveAttribute('inert');
+    expect(screen.getByLabelText('Main').closest('[inert]')).toBeNull();
+  });
+
+  it('holds the background until the last of several stacked dialogs closes', async () => {
+    const user = userEvent.setup();
+    render(<Stack />);
+    const root = appRoot();
+    await user.click(screen.getByRole('button', { name: 'Open first' }));
+    const first = await screen.findByRole('dialog', { name: 'First' });
+    const firstRoot = first.closest('body > *') as HTMLElement;
+    await user.click(screen.getByRole('button', { name: 'Open second' }));
+    await screen.findByRole('alertdialog', { name: 'Second' });
+    expect(root).toHaveAttribute('inert');
+    expect(firstRoot).toHaveAttribute('inert');
+
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+    expect(firstRoot).not.toHaveAttribute('inert');
+    expect(root).toHaveAttribute('inert');
+
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(root).not.toHaveAttribute('inert');
+  });
+
+  it('restores the background when the open dialog unmounts', async () => {
+    const user = userEvent.setup();
+    const view = render(<Stack />);
+    const root = appRoot();
+    await user.click(screen.getByRole('button', { name: 'Open first' }));
+    await screen.findByRole('dialog', { name: 'First' });
+    expect(root).toHaveAttribute('inert');
+    view.unmount();
+    expect(document.body.querySelector('[inert]')).toBeNull();
   });
 });
 
