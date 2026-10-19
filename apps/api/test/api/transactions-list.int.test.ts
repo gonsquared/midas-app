@@ -1,5 +1,6 @@
 import { ProblemSchema, TransactionPageSchema, type Transaction } from '@midas/shared';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { filterHash } from '../../src/modules/transactions/cursor.js';
 import { createIntegrationContext, registerUser, type IntegrationContext } from '../support/api.js';
 import { describeDb, truncateAll } from '../support/db.js';
 import {
@@ -297,6 +298,22 @@ describeDb('transaction list, search and filter API (real PostgreSQL)', () => {
       ];
       for (const other of otherQueries) {
         const res = await list(user.headers, `${other}&cursor=${cursor}`);
+        expect(res.statusCode).toBe(400);
+        expect(ProblemSchema.parse(res.json()).code).toBe('INVALID_CURSOR');
+      }
+    });
+
+    it('rejects a cursor with a timestamp outside years 1900-2100', async () => {
+      const { user } = await bulk();
+      const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
+      const id = '0199c6a8-0000-7000-8000-00000000000a';
+      for (const [date, createdAt] of [
+        ['2026-01-01', '0000-01-01T00:00:00.000Z'],
+        ['2026-01-01', '2101-01-01T00:00:00.000Z'],
+        ['0000-01-01', '2026-01-01T00:00:00.000Z'],
+      ] as const) {
+        const bad = encode({ v: 1, s: 'date_desc', f: filterHash({}), k: [date, createdAt, id] });
+        const res = await list(user.headers, `?limit=5&sort=date_desc&cursor=${bad}`);
         expect(res.statusCode).toBe(400);
         expect(ProblemSchema.parse(res.json()).code).toBe('INVALID_CURSOR');
       }

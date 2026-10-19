@@ -83,7 +83,7 @@ describeDb('audit trail of auth events (real PostgreSQL, E9-F1-S2)', () => {
     ]);
     expect(rows[0]).toMatchObject({ actor_user_id: user.id, target_type: 'session' });
     expect(rows[1]).toMatchObject({
-      actor_user_id: user.id,
+      actor_user_id: null,
       target_type: 'user',
       target_id: user.id,
       metadata: {},

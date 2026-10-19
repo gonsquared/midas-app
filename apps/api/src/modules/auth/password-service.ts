@@ -129,7 +129,8 @@ export class PasswordService {
       const consumedFor = await resetTokens.consume(tokenHash, now);
       if (consumedFor === null) throw resetTokenInvalid();
       const user = await users.findById(consumedFor);
-      if (!user) throw resetTokenInvalid();
+      // A suspended account must not regain access through a token issued before the suspension.
+      if (!user || user.status !== 'active') throw resetTokenInvalid();
       assertStrongPassword(input.newPassword, user, 'newPassword');
       await users.updatePassword(user.id, passwordHash);
       await sessions.revokeAllForUser(user.id, 'password_reset', now);

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import { boundedTimestamp } from '../../platform/cursor-time.js';
 import { AppError } from '../../platform/errors.js';
 
 /**
@@ -11,7 +12,7 @@ import { AppError } from '../../platform/errors.js';
 const PayloadSchema = z.strictObject({
   v: z.literal(1),
   f: z.string().length(22),
-  k: z.tuple([z.iso.datetime(), z.uuid()]),
+  k: z.tuple([boundedTimestamp, z.uuid()]),
 });
 
 export interface AuditCursorFilters {

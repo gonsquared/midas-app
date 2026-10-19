@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { ClientConfig } from 'pg';
 import { z } from 'zod';
 import { DEFAULT_RATE_LIMIT_MAX_KEYS } from './rate-limit.js';
@@ -64,6 +65,7 @@ const EnvSchema = z.object({
   RATE_LIMIT_FORGOT_IP_MAX: positiveInt(10), // per IP, per hour
   RATE_LIMIT_RESET_MAX: positiveInt(10), // per IP, per hour
   RATE_LIMIT_REFRESH_MAX: positiveInt(30), // per session (or IP when no cookie), per minute
+  RATE_LIMIT_REFRESH_IP_MAX: positiveInt(60), // all refresh attempts, per IP, per minute
   RATE_LIMIT_PASSWORD_CHANGE_MAX: positiveInt(10), // per user, per hour
   RATE_LIMIT_USER_WRITE_MAX: positiveInt(120), // authenticated writes, per user, per minute
   RATE_LIMIT_USER_READ_MAX: positiveInt(600), // authenticated reads, per user, per minute
@@ -102,6 +104,9 @@ const EnvSchema = z.object({
   AUDIT_HMAC_SECRET: optional(z.string().min(32, 'must be at least 32 characters').max(256)),
   // One-time fallback to promote an existing user when no admin exists (ADR-013).
   BOOTSTRAP_ADMIN_EMAIL: optional(z.string().trim().toLowerCase().max(254).pipe(z.email())),
+
+  // Folder with the built SPA (apps/web/dist). Relative paths resolve from the working directory.
+  WEB_DIST_DIR: z.preprocess(emptyToUndefined, z.string().max(1024).optional()),
 
   // Comma-separated browser origins allowed in development; ignored in production (same origin).
   CORS_ORIGINS: z.preprocess(emptyToUndefined, z.string().max(2048).optional()),
@@ -169,6 +174,7 @@ export interface Config {
     forgotIpMax: number;
     resetMax: number;
     refreshMax: number;
+    refreshIpMax: number;
     passwordChangeMax: number;
     userWriteMax: number;
     userReadMax: number;
@@ -188,6 +194,8 @@ export interface Config {
     };
   };
   cors: { origins: string[] };
+  /** Built SPA served from the API origin; ignored (API only) when the folder has no index.html. */
+  web: { distDir: string };
   scheduler: {
     enabled: boolean;
     intervalSeconds: number;
@@ -227,6 +235,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   }
   if (e.NODE_ENV === 'production' && e.DATABASE_SSL === 'off') {
     problems.push('DATABASE_SSL: "off" is not allowed in production');
+  }
+  if (e.NODE_ENV === 'production' && !e.RATE_LIMIT_ENABLED) {
+    problems.push('RATE_LIMIT_ENABLED: "false" is not allowed in production');
   }
   if (e.SESSION_ABSOLUTE_TTL_DAYS < e.REFRESH_TOKEN_TTL_DAYS) {
     problems.push('SESSION_ABSOLUTE_TTL_DAYS: must be >= REFRESH_TOKEN_TTL_DAYS');
@@ -310,6 +321,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       forgotIpMax: e.RATE_LIMIT_FORGOT_IP_MAX,
       resetMax: e.RATE_LIMIT_RESET_MAX,
       refreshMax: e.RATE_LIMIT_REFRESH_MAX,
+      refreshIpMax: e.RATE_LIMIT_REFRESH_IP_MAX,
       passwordChangeMax: e.RATE_LIMIT_PASSWORD_CHANGE_MAX,
       userWriteMax: e.RATE_LIMIT_USER_WRITE_MAX,
       userReadMax: e.RATE_LIMIT_USER_READ_MAX,
@@ -329,6 +341,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       },
     },
     cors: { origins: e.NODE_ENV === 'production' ? [] : cors.origins },
+    web: { distDir: path.resolve(e.WEB_DIST_DIR ?? '../web/dist') },
     scheduler: {
       enabled: e.SCHEDULER_ENABLED,
       intervalSeconds: e.SCHEDULER_INTERVAL_SECONDS,

@@ -7,6 +7,7 @@ import {
   type TransactionSort,
 } from '@midas/shared';
 import { z } from 'zod';
+import { boundedTimestamp, isBoundedDate } from '../../platform/cursor-time.js';
 import { AppError } from '../../platform/errors.js';
 
 /**
@@ -20,7 +21,7 @@ const PayloadSchema = z.strictObject({
   s: z.enum(TRANSACTION_SORTS),
   f: z.string().length(22),
   // Sort key: occurred_on (date sorts) or amount_minor (amount sorts), created_at, id.
-  k: z.tuple([z.union([LocalDateSchema, AmountMinorSchema]), z.iso.datetime(), z.uuid()]),
+  k: z.tuple([z.union([LocalDateSchema, AmountMinorSchema]), boundedTimestamp, z.uuid()]),
 });
 
 export interface CursorKey {
@@ -83,5 +84,6 @@ export function decodeCursor(
   // The primary key must match the sort kind: a date for date sorts, an integer for amount sorts.
   const isDateSort = sort.startsWith('date');
   if (isDateSort !== (typeof k[0] === 'string')) throw invalidCursor();
+  if (typeof k[0] === 'string' && !isBoundedDate(k[0])) throw invalidCursor();
   return { primary: k[0], createdAt: k[1], id: k[2] };
 }

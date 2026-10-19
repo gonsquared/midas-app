@@ -100,6 +100,15 @@ export function authRoutes(app: FastifyInstance, options: AuthRoutesOptions): vo
     },
     maxKeys,
   });
+  // Per IP regardless of the cookie: the per-session key is client-controlled, so rotating forged
+  // (well-formed) session ids would otherwise earn a fresh bucket every time.
+  const refreshPerIp = createLimiter(app, {
+    name: 'refresh-ip',
+    max: rateLimit.refreshIpMax,
+    windowSeconds: 60,
+    key: ip,
+    maxKeys,
+  });
   const forgotPerIp = createLimiter(app, {
     name: 'forgot-ip',
     max: rateLimit.forgotIpMax,
@@ -154,6 +163,7 @@ export function authRoutes(app: FastifyInstance, options: AuthRoutesOptions): vo
 
   app.post('/api/v1/auth/refresh', async (request, reply) => {
     assertCsrfProtected(request, appOrigin);
+    await refreshPerIp(request, reply);
     await refreshLimiter(request, reply);
     const token = readCookie(request.headers.cookie, REFRESH_COOKIE);
     try {

@@ -11,6 +11,9 @@ export function testEnv(overrides: Record<string, string> = {}): NodeJS.ProcessE
     LOG_LEVEL: 'silent',
     DATABASE_URL: 'postgres://nobody:nopass@127.0.0.1:1/none',
     JWT_ACCESS_SECRET: TEST_SECRET,
+    // Never pick up a local `pnpm build` (apps/web/dist is the default): with a build present the
+    // SPA routes (`GET /`, `GET /assets/*`) would appear in the route-table audits and fail them.
+    WEB_DIST_DIR: '/nonexistent/midas-web',
     ...overrides,
   };
 }

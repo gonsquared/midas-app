@@ -1,10 +1,22 @@
+import { existsSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { runner } from 'node-pg-migrate';
 import pg from 'pg';
 
 export const MIGRATIONS_TABLE = 'schema_migrations';
-export const MIGRATIONS_DIR = fileURLToPath(new URL('../../../db/migrations', import.meta.url));
+/**
+ * Source checkout: apps/api/db/migrations, three levels above this file. Production bundle
+ * (apps/api/scripts/build.mjs): dist/db/migrations next to dist/cli.js, so that is checked first.
+ */
+function resolveMigrationsDir(): string {
+  const bundled = fileURLToPath(new URL('./db/migrations', import.meta.url));
+  return existsSync(bundled)
+    ? bundled
+    : fileURLToPath(new URL('../../../db/migrations', import.meta.url));
+}
+
+export const MIGRATIONS_DIR = resolveMigrationsDir();
 
 const MIGRATION_FILE = /^(\d{17})_([a-z0-9]+(?:-[a-z0-9]+)*)\.(ts|js)$/;
 

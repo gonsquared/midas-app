@@ -105,6 +105,23 @@ describeDb('password reset and change (real PostgreSQL)', () => {
     expect((await verify(token)).statusCode).toBe(400);
   });
 
+  it('rejects a token issued before the account was suspended, without leaking why', async () => {
+    const user = await registerUser(ctx.app);
+    const token = await requestToken(user.email);
+    await ctx.owner.query(
+      `update users set status = 'suspended', suspended_at = now() where id = $1`,
+      [user.id],
+    );
+    const res = await reset(token, NEW_PASSWORD);
+    expect(res.statusCode).toBe(400);
+    expect(ProblemSchema.parse(res.json()).code).toBe('RESET_TOKEN_INVALID');
+    // The password is unchanged: once reactivated, the old one still signs in.
+    await ctx.owner.query(`update users set status = 'active', suspended_at = null where id = $1`, [
+      user.id,
+    ]);
+    expect((await login(user.email, STRONG_PASSWORD)).statusCode).toBe(200);
+  });
+
   it('revokes every session and replaces the password', async () => {
     const user = await registerUser(ctx.app);
     const token = await requestToken(user.email);
