@@ -10,7 +10,7 @@ Deployment details (environment, migrations, rollback, backup) are in [deploymen
 The review summaries, API reference and user guide now exist (`docs/reviews/`, `docs/api/README.md`, `docs/user-guide.md`). Still open:
 
 - [ ] E10-F2-S3: manual screen-reader testing (NVDA, VoiceOver) has not been performed; run it or explicitly waive it. A11Y-02 (wallet row-menu focus return) is fixed. See [accessibility audit](../qa/accessibility-audit.md).
-- [ ] README and user guide screenshots are missing (placeholders only; 9 screens listed in the README).
+- [x] README and user guide screenshots added (`docs/images/`, rendered from the fake API, so sample data; the admin audit log is not pictured).
 - [ ] The first GitHub run of the `production-image` job and of the coverage CI step has not been observed (verified locally by qa-agent only).
 - [ ] Branch protection: update the required checks for the renamed `production-image` job.
 - [ ] Version bump: the root `package.json` is still `0.0.0`.
@@ -29,7 +29,7 @@ The review summaries, API reference and user guide now exist (`docs/reviews/`, `
 - [ ] `pnpm audit --audit-level=high` is clean apart from the documented `braces` exception.
 - [ ] `pnpm --filter @midas/api test:perf` run on the release commit (not part of CI).
 - [ ] README, CONTRIBUTING and `.env.example` match the code (every variable in `apps/api/src/platform/config.ts` is documented).
-- [ ] Screenshots in the README are captured (currently a TODO placeholder).
+- [x] Screenshots in the README are captured (sample data; see the note in the README).
 
 ## Secrets and configuration
 

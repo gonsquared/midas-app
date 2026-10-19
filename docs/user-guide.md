@@ -22,7 +22,7 @@ This guide describes every screen in the app. Names in **bold** are the labels y
 14. [Privacy and security](#14-privacy-and-security)
 15. [Troubleshooting](#15-troubleshooting)
 
-TODO: screenshots are not included yet. They will be added under `docs/images/` once captured from the running app.
+Screenshots live in [docs/images/](./images/) and are shown in the [README](../README.md#screenshots). The pictures are the real web app rendered against an in-memory fake API, so every name and amount is sample data, not a real account. Regenerate them with `CAPTURE_SCREENSHOTS=1 pnpm --filter @midas/e2e exec playwright test screenshots.spec.ts` (see `e2e/tests/screenshots.spec.ts`).
 
 ## 1. Getting started
 

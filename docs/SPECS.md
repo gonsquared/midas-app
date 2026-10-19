@@ -327,7 +327,7 @@ Requirement IDs use `REQ-<epic>.<feature>.<seq>`. Epic and feature numbers follo
 | REQ-10.3.2 | A production image builds in CI; a deployment guide covers env vars, migrations, rollback and backup. | Must Have | E10-F3-S2. Status: Done, QA Pass. Registry publishing is not set up ([deployment guide](./operations/deployment.md)) |
 | REQ-10.3.3 | The OpenAPI document is published and matches the implementation; the user guide covers all features; docs are reviewed for standalone-product tone. | Must Have | E10-F3-S3. Status: In Progress. [API reference](./api/README.md) and [user guide](./user-guide.md) written; the OpenAPI file is committed and checked against the routes by tests |
 | REQ-10.3.6 | Every route the server registers is described in the OpenAPI document, each operation states whether it is implemented or planned, and a test fails when the document and the routes disagree. | Must Have | E10-F3-S3; `apps/api/src/openapi.test.ts` |
-| REQ-10.3.4 | The README provides overview, features, screenshots, quickstart, architecture and testing summary, and links to docs and license. | Must Have | E10-F3-S4. Status: In Progress. Screenshots are a marked TODO |
+| REQ-10.3.4 | The README provides overview, features, screenshots, quickstart, architecture and testing summary, and links to docs and license. | Must Have | E10-F3-S4. Status: In Progress. Screenshots added (sample data from the fake API) |
 | REQ-10.3.5 | A release checklist confirms all stories are Done or documented as deferred, the summary table is final, and a Final Backlog Review section exists. | Must Have | E10-F3-S5. Status: In Progress. v1.0 is not declared ready |
 
 **Requirement count:** 109 functional requirements across 10 epics and 24 features, covering all 80 stories.

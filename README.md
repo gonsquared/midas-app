@@ -20,17 +20,17 @@ Out of scope for v1: bank syncing, shared wallets, receipt OCR, native mobile ap
 
 ## Screenshots
 
-TODO: no screenshots are committed yet and none have been fabricated. Capture these screens from the running app (light theme unless noted) and add them under `docs/images/`:
+The pictures are the real web app rendered against an in-memory fake API, so every name and amount is sample data, not a real account. Regenerate them with `CAPTURE_SCREENSHOTS=1 pnpm --filter @midas/e2e exec playwright test screenshots.spec.ts` (see `e2e/tests/screenshots.spec.ts`).
 
-1. Sign-in page
-2. Dashboard (balances, income vs expense, category breakdown, budget status)
-3. Dashboard in dark theme
-4. Wallets list
-5. Transactions list with filters
-6. Budgets with a warning and an exceeded state
-7. Reports (charts and their table alternatives)
-8. Recurring transactions
-9. Admin users and audit log
+| | |
+| --- | --- |
+| ![Sign-in page](docs/images/01-sign-in.png) | ![Dashboard](docs/images/02-dashboard.png) |
+| ![Dashboard, dark theme](docs/images/03-dashboard-dark.png) | ![Wallets](docs/images/04-wallets.png) |
+| ![Transactions](docs/images/05-transactions.png) | ![Budgets with a warning and an exceeded state](docs/images/06-budgets.png) |
+| ![Reports](docs/images/07-reports.png) | ![Recurring transactions](docs/images/08-recurring.png) |
+| ![Admin users](docs/images/09-admin-users.png) | |
+
+The admin audit log is not pictured: the fake API returns no audit entries, and an empty table shows nothing useful.
 
 ## Quickstart
 

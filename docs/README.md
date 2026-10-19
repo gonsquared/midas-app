@@ -35,5 +35,5 @@ Review outcomes live in `docs/reviews/`: [backend code and security review](./re
 
 ## Not yet written
 
-Screenshots for the README and the user guide are a marked TODO. The OpenAPI file is committed and
+Screenshots are in `docs/images/` (sample data from the fake API, not a real account). The OpenAPI file is committed and
 checked by tests; it is not yet served by the running API or published as a hosted site.
