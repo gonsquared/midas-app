@@ -39,16 +39,16 @@ Workspace packages are declared in `pnpm-workspace.yaml`. Packages must only imp
 
 ## Daily commands
 
-| Command             | What it does                                        |
-| ------------------- | --------------------------------------------------- |
-| `pnpm lint`         | ESLint (flat config) across the repository          |
-| `pnpm format`       | Prettier, writes changes                            |
-| `pnpm format:check` | Prettier, fails on unformatted files (used in CI)   |
-| `pnpm typecheck`    | `tsc --noEmit` in every workspace that defines it   |
-| `pnpm test`         | Unit tests in every workspace that defines them     |
-| `pnpm build`        | Builds every workspace that defines a build script  |
-| `pnpm test:coverage` | Tests with V8 coverage; thresholds fail the run (CI runs this) |
-| `pnpm test:e2e`     | Playwright browser tests (see the README for setup) |
+| Command                              | What it does                                                                |
+| ------------------------------------ | --------------------------------------------------------------------------- |
+| `pnpm lint`                          | ESLint (flat config) across the repository                                  |
+| `pnpm format`                        | Prettier, writes changes                                                    |
+| `pnpm format:check`                  | Prettier, fails on unformatted files (used in CI)                           |
+| `pnpm typecheck`                     | `tsc --noEmit` in every workspace that defines it                           |
+| `pnpm test`                          | Unit tests in every workspace that defines them                             |
+| `pnpm build`                         | Builds every workspace that defines a build script                          |
+| `pnpm test:coverage`                 | Tests with V8 coverage; thresholds fail the run (CI runs this)              |
+| `pnpm test:e2e`                      | Playwright browser tests (see the README for setup)                         |
 | `pnpm --filter @midas/api test:perf` | 100,000 transaction performance baseline (needs Docker, not in `pnpm test`) |
 
 Run `pnpm lint && pnpm format:check && pnpm typecheck` before opening a pull request, and `pnpm test:coverage` when you change behaviour, since CI enforces the coverage thresholds.
