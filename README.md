@@ -43,7 +43,118 @@ cp .env.example .env            # replace every change-me-* placeholder
 docker compose up --build       # then open http://localhost:5173
 ```
 
-Password reset emails appear in Mailpit at http://localhost:8025. Running on the host without containers, the production image and all environment variables are covered in [Local setup](#local-setup), [Docker usage](#docker-usage) and [Environment variables](#environment-variables).
+Password reset emails appear in Mailpit at http://localhost:8025. For a first run, follow [Running locally, step by step](#running-locally-step-by-step). Running on the host without containers, the production image and all environment variables are covered in [Local setup](#local-setup), [Docker usage](#docker-usage) and [Environment variables](#environment-variables).
+
+## Running locally, step by step
+
+There are no built-in user accounts or demo logins. You set a few secrets in `.env`, start the stack, then register your own account in the app. The only credentials you need to choose are the two database passwords and the JWT secret.
+
+### 1. Install the prerequisites
+
+- Node.js 24 (`node --version` should print `v24.x`).
+- Docker Desktop (or Docker Engine with the Compose plugin), running.
+- Git Bash or WSL is handy on Windows for `openssl`, but the Node one-liner in step 3 works in any shell.
+
+### 2. Install dependencies
+
+From the `midas-app` folder:
+
+```bash
+corepack enable        # once per machine; gives you the pinned pnpm 10.x
+pnpm install
+```
+
+### 3. Create `.env` and fill in the secrets
+
+```bash
+cp .env.example .env               # PowerShell: Copy-Item .env.example .env
+```
+
+Generate random values (run once per secret; any of these works):
+
+```bash
+openssl rand -base64 48
+node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"
+```
+
+Then edit `.env`. These are the only lines you must touch; leave everything else at the template defaults.
+
+| Variable | What to put | Why |
+| --- | --- | --- |
+| `JWT_ACCESS_SECRET` | A generated value (at least 43 characters) | Signs access tokens. The API refuses to start while it still contains `change-me`. |
+| `POSTGRES_PASSWORD` | A password you choose, e.g. a generated value | Password of the database owner role `midas_owner`, which runs migrations. |
+| `MIDAS_APP_DB_PASSWORD` | A different password you choose | Password of the restricted `midas_app` role the API connects as. |
+| `DATABASE_MIGRATION_URL` | `postgres://midas_owner:<POSTGRES_PASSWORD>@localhost:5432/midas` | Only used when you run the API on the host (option B). The password must equal `POSTGRES_PASSWORD`. |
+| `DATABASE_URL` | `postgres://midas_app:<MIDAS_APP_DB_PASSWORD>@localhost:5432/midas` | Only used when you run the API on the host (option B). The password must equal `MIDAS_APP_DB_PASSWORD`. |
+
+Notes:
+
+- Generated base64 values can contain `/`, `+` and `=`. They are fine in `JWT_ACCESS_SECRET`, but inside a `postgres://` URL they must be percent-encoded. The easy way out is to use letters and digits only for the two database passwords (for example `openssl rand -hex 24`).
+- The database passwords are only accepted by PostgreSQL on the **first** start, when the data volume is created (`infra/db/init/01-app-roles.sh` creates `midas_app` then). If you change them later, reset the database with `docker compose down -v` so they are applied again; this deletes all local data.
+- Optional extras: `AUDIT_HMAC_SECRET` (at least 32 characters) adds an email hash to audit rows for failed sign-ins on unknown accounts; `METRICS_TOKEN` enables `GET /metrics`. Neither is needed to use the app.
+- Mail needs nothing: the template already points at Mailpit (`SMTP_HOST=localhost`, `SMTP_PORT=1025`, no user or password).
+
+### 4. Start the app
+
+**Option A: everything in Docker (recommended).**
+
+```bash
+docker compose up --build
+```
+
+This starts PostgreSQL, Mailpit, runs the migrations and system category seed once, then starts the API and the web app with hot reload. In this mode Compose builds the database URLs and SMTP settings itself from `POSTGRES_PASSWORD` and `MIDAS_APP_DB_PASSWORD`, so `DATABASE_URL` and `DATABASE_MIGRATION_URL` in `.env` are not used. Wait until the `api` log shows the server listening.
+
+**Option B: database in Docker, API and web on the host.**
+
+```bash
+docker compose up -d db mailpit
+pnpm --filter @midas/api migrate
+pnpm --filter @midas/api seed:system
+pnpm --filter @midas/api dev       # terminal 1, port 3000
+pnpm --filter @midas/web dev       # terminal 2, port 5173
+```
+
+Here `DATABASE_URL` and `DATABASE_MIGRATION_URL` from `.env` are used, so their passwords must match step 3.
+
+### 5. Open the app and create your account
+
+1. Open http://localhost:5173.
+2. Choose **Create an account** and sign up with any email and a password of at least 12 characters that the strength meter accepts (a short common phrase is rejected). The email is not verified, so a made-up address works.
+3. Sign in. Your account is a normal user; the system categories are already there.
+
+To test "Forgot password", request a reset in the app and open the email in Mailpit at http://localhost:8025.
+
+### 6. (Optional) Create an admin account
+
+Nobody becomes admin by registering. With the Compose stack running:
+
+```bash
+# Create a new admin account (prompts for the password)
+docker compose exec api node --import tsx src/cli.ts admin:create --email admin@example.com
+
+# Or make your existing account an admin
+docker compose exec api node --import tsx src/cli.ts admin:promote --email you@example.com
+```
+
+When running on the host (option B), use `pnpm --filter @midas/api cli admin:create --email ...` or `cli admin:promote --email ...` instead. Sign out and back in to see the Admin area.
+
+### 7. Stop or reset
+
+```bash
+docker compose down        # stop, keep your data
+docker compose down -v     # stop and delete the database (fresh start)
+```
+
+### Common problems
+
+| Symptom | Cause and fix |
+| --- | --- |
+| `set POSTGRES_PASSWORD in .env` or `set MIDAS_APP_DB_PASSWORD in .env` | `.env` is missing or the variable is empty. Do step 3. |
+| API exits with `JWT_ACCESS_SECRET: placeholder value is not allowed` or `must be at least 43 characters` | Replace it with a generated value. |
+| `password authentication failed for user "midas_app"` or `"midas_owner"` | The passwords in `.env` differ from the ones the volume was created with. Run `docker compose down -v` and start again, or (option B) fix the passwords in the URLs. |
+| Port 5432, 3000 or 5173 already in use | Stop the other PostgreSQL or dev server, or the old Midas containers. |
+| `localhost:5173` does not load in option A | A Vite server on the host is answering first; stop it or open http://127.0.0.1:5173. |
+| Login says too many attempts | Rate limits are on by default. Wait a minute, or restart the API to clear the in-memory counters. |
 
 ## Tech stack
 
