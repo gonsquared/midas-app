@@ -45,11 +45,11 @@
     "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
     "@types/pg-cursor": "^2.7.2",
-    "@vitest/coverage-v8": "5.0.5",
+    "@vitest/coverage-v8": "5.1.0",
     "esbuild": "^0.28.2",
     "kysely-codegen": "^0.20.0",
     "testcontainers": "^12.2.1",
     "tsx": "^4.23.15",
-    "vitest": "^5.0.5"
+    "vitest": "^5.1.0"
   }
 }
